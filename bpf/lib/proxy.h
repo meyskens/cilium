@@ -12,10 +12,6 @@
 
 #define ENABLE_TPROXY 1  // kill me now
 
-// set localhost_ipv4
-static __be32 localhost_ipv4 = INADDR_LOOPBACK;
-static union v6addr localhost_ipv6 = { .addr[15] = 1,};
-
 #ifdef ENABLE_TPROXY
 static __always_inline int
 assign_socket_tcp(struct __ctx_buff *ctx,
@@ -142,7 +138,7 @@ NAME(struct __ctx_buff *ctx, CT_TUPLE_TYPE * ct_tuple, __be16 proxy_port, TPROXY
 	/* if there's no established connection, locate the tproxy socket */	\
 	tuple->SK_FIELD.dport = proxy_port;					\
 	tuple->SK_FIELD.sport = 0;					\
-	memcpy(&tuple->SK_FIELD.daddr, tproxy_addr, sizeof(tuple->SK_FIELD.daddr)); \
+	memcpy(&tuple->SK_FIELD.daddr, &tproxy_addr, sizeof(tuple->SK_FIELD.daddr)); \
 	memset(&tuple->SK_FIELD.saddr, 0, sizeof(tuple->SK_FIELD.saddr));	\
 	cilium_dbg3(ctx, DBG_LOOKUP_CODE,					\
 		    tuple->SK_FIELD.SADDR_DBG, tuple->SK_FIELD.DADDR_DBG,	\
@@ -155,11 +151,11 @@ out:										\
 
 #ifdef ENABLE_IPV4
 CTX_REDIRECT_FN(ctx_redirect_to_proxy_ingress4, struct ipv4_ct_tuple, ipv4,
-		DBG_SK_LOOKUP4, daddr, saddr, __be32 *)
+		DBG_SK_LOOKUP4, daddr, saddr, __be32)
 #endif
 #ifdef ENABLE_IPV6
 CTX_REDIRECT_FN(ctx_redirect_to_proxy_ingress6, struct ipv6_ct_tuple, ipv6,
-		DBG_SK_LOOKUP6, daddr[3], saddr[3],union v6addr *)
+		DBG_SK_LOOKUP6, daddr[3], saddr[3],union v6addr)
 #endif
 #undef CTX_REDIRECT_FN
 #endif /* ENABLE_TPROXY */
@@ -213,11 +209,13 @@ __ctx_redirect_to_proxy(struct __ctx_buff *ctx, void *tuple __maybe_unused,
 	if (proxy_port && !from_host) {
 #ifdef ENABLE_IPV4
 		if (ipv4)
-			result = ctx_redirect_to_proxy_ingress4(ctx, tuple, proxy_port, &localhost_ipv4);
+			result = ctx_redirect_to_proxy_ingress4(ctx, tuple, proxy_port, INADDR_LOOPBACK);
 #endif /* ENABLE_IPV4 */
 #ifdef ENABLE_IPV6
-		if (!ipv4)
-			result = ctx_redirect_to_proxy_ingress6(ctx, tuple, proxy_port, &localhost_ipv6);
+		if (!ipv4) {
+			union v6addr ipv6_localhost = { .addr[15] = 1,};
+			result = ctx_redirect_to_proxy_ingress6(ctx, tuple, proxy_port, ipv6_localhost);
+		}
 #endif /* ENABLE_IPV6 */
 	}
 #endif /* ENABLE_TPROXY */
@@ -289,6 +287,9 @@ ctx_redirect_to_proxy_first(struct __ctx_buff *ctx, __be16 proxy_port)
 	int ret = CTX_ACT_OK;
 #if defined(ENABLE_TPROXY)
 	__u16 proto;
+#ifdef ENABLE_IPV6
+	union v6addr ipv6_localhost = { .addr[15] = 1,};
+#endif
 
 	/**
 	 * For reply traffic to egress proxy for a local endpoint, we skip the
@@ -313,7 +314,7 @@ ctx_redirect_to_proxy_first(struct __ctx_buff *ctx, __be16 proxy_port)
 		ret = extract_tuple6(ctx, &tuple);
 		if (ret < 0)
 			return ret;
-		ret = ctx_redirect_to_proxy_ingress6(ctx, &tuple, proxy_port, &localhost_ipv6);
+		ret = ctx_redirect_to_proxy_ingress6(ctx, &tuple, proxy_port, ipv6_localhost);
 		break;
 	}
 #endif /* ENABLE_IPV6 */
@@ -324,7 +325,7 @@ ctx_redirect_to_proxy_first(struct __ctx_buff *ctx, __be16 proxy_port)
 		ret = extract_tuple4(ctx, &tuple);
 		if (ret < 0)
 			return ret;
-		ret = ctx_redirect_to_proxy_ingress4(ctx, &tuple, proxy_port, &localhost_ipv4);
+		ret = ctx_redirect_to_proxy_ingress4(ctx, &tuple, proxy_port, INADDR_LOOPBACK);
 		break;
 	}
 #endif /* ENABLE_IPV4 */
