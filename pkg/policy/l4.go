@@ -223,6 +223,8 @@ const (
 	AuthTypeNone AuthType = iota
 	// AuthTypeNull is a simple auth type that always succeeds
 	AuthTypeNull
+	// AuthTypeMTLSSpiffe is a mTLS auth type that uses SPIFFE identities with a SPIRE server
+	AuthTypeMTLSSpiffe
 )
 
 // GetAuthType returns the AuthType of the L4Filter.
