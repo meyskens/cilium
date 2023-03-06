@@ -235,6 +235,8 @@ func (a *PerSelectorPolicy) GetAuthType() AuthType {
 	switch a.Auth.Type {
 	case "null":
 		return AuthTypeNull
+	case "mtls-spiffe":
+		return AuthTypeMTLSSpiffe
 	}
 	return AuthTypeNone
 }
@@ -251,6 +253,8 @@ func (a AuthType) String() string {
 		return "none"
 	case AuthTypeNull:
 		return "null"
+	case AuthTypeMTLSSpiffe:
+		return "mtls-spiffe"
 	}
 	return fmt.Sprintf("Unknown-auth-type-%d", a.Uint8())
 }
