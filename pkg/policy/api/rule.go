@@ -14,7 +14,8 @@ import (
 type AuthType string
 
 const (
-	AuthTypeNull AuthType = "null" // Always succeeds
+	AuthTypeNull       AuthType = "null"        // Always succeeds
+	AuthTypeMTLSSpiffe AuthType = "mtls-spiffe" // Mutual TLS with SPIFFE as certificate provider
 )
 
 // Auth specifies the kind of cryptographic authentication required for the traffic to
