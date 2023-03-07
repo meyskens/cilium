@@ -8,6 +8,9 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"strings"
+
+	"github.com/cilium/cilium/pkg/identity"
 )
 
 // This file implements the CertificateProvider interface
@@ -19,8 +22,8 @@ func (s *SpireDelegateClient) GetTrustBundle() (*x509.CertPool, error) {
 	return s.trustBundle, nil
 }
 
-func (s *SpireDelegateClient) GetCertificateForIdentity(identity string) (*tls.Certificate, error) {
-	spiffeID := s.sniToSPIFFEID(identity)
+func (s *SpireDelegateClient) GetCertificateForNumericIdentity(id identity.NumericIdentity) (*tls.Certificate, error) {
+	spiffeID := s.sniToSPIFFEID(id)
 	svid, ok := s.svidStore[spiffeID]
 	if !ok {
 		return nil, fmt.Errorf("no SPIFFE ID for %s", spiffeID)
@@ -58,12 +61,12 @@ func (s *SpireDelegateClient) GetCertificateForIdentity(identity string) (*tls.C
 	}, nil
 }
 
-func (s *SpireDelegateClient) sniToSPIFFEID(sni string) string {
-	return fmt.Sprintf("spiffe://%s/cilium-id/%s", s.cfg.SpiffeTrustDomain, sni)
+func (s *SpireDelegateClient) sniToSPIFFEID(id identity.NumericIdentity) string {
+	return fmt.Sprintf("spiffe://%s/cilium-id/%s", s.cfg.SpiffeTrustDomain, id.String())
 }
 
-func (s *SpireDelegateClient) ValidateIdentity(identity string, cert *x509.Certificate) (bool, error) {
-	spiffeID := s.sniToSPIFFEID(identity)
+func (s *SpireDelegateClient) ValidateIdentity(id identity.NumericIdentity, cert *x509.Certificate) (bool, error) {
+	spiffeID := s.sniToSPIFFEID(id)
 
 	// Spec: SVIDs containing more than one URI SAN MUST be rejected
 	if len(cert.URIs) != 1 {
@@ -71,4 +74,18 @@ func (s *SpireDelegateClient) ValidateIdentity(identity string, cert *x509.Certi
 	}
 
 	return cert.URIs[0].String() == spiffeID, nil
+}
+
+func (s *SpireDelegateClient) NumericIdentityToSNI(id identity.NumericIdentity) string {
+	return fmt.Sprintf("%s.%s", id.String(), s.cfg.SpiffeTrustDomain)
+}
+
+func (s *SpireDelegateClient) SNIToNumericIdentity(sni string) (identity.NumericIdentity, error) {
+	suffix := fmt.Sprintf(".%s", s.cfg.SpiffeTrustDomain)
+	if !strings.HasSuffix(sni, suffix) {
+		return 0, fmt.Errorf("SNI %s does not belong to our trust domain", sni)
+	}
+
+	idStr := strings.TrimSuffix(sni, suffix)
+	return identity.ParseNumericIdentity(idStr)
 }

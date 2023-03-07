@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/cilium/pkg/auth/certs"
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/hive/cell"
+	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/policy"
 	"github.com/sirupsen/logrus"
@@ -69,27 +70,32 @@ type mtlsAuthHandler struct {
 	cert certs.CertificateProvider
 }
 
-func (m *mtlsAuthHandler) authenticate(fromIP, fromID, toIP, toID string) error {
-	cert, err := m.cert.GetCertificateForIdentity(fromID)
+func (m *mtlsAuthHandler) authenticate(ar *authRequest) (*authResponse, error) {
+	if ar == nil {
+		return nil, errors.New("authRequest is nil")
+	}
+	cert, err := m.cert.GetCertificateForNumericIdentity(ar.localIdentity)
 	if err != nil {
-		return fmt.Errorf("Failed to get certificate for identity %s: %w", fromID, err)
+		return nil, fmt.Errorf("Failed to get certificate for identity %s: %w", ar.remoteIdentity.String(), err)
 	}
 
 	caBundle, err := m.cert.GetTrustBundle()
 	if err != nil {
-		return fmt.Errorf("Failed to get CA bundle: %w", err)
+		return nil, fmt.Errorf("Failed to get CA bundle: %w", err)
 	}
 
 	// set up TCP connection
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", toIP, m.cfg.MTLSListenerPort))
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", ar.remoteHostIP.String(), m.cfg.MTLSListenerPort))
 	if err != nil {
-		return fmt.Errorf("Failed to dial %s:%d: %w", toIP, m.cfg.MTLSListenerPort, err)
+		return nil, fmt.Errorf("Failed to dial %s:%d: %w", ar.remoteHostIP.String(), m.cfg.MTLSListenerPort, err)
 	}
 	defer conn.Close()
 
+	var expirationTime *time.Time
+
 	// set up TLS socket
 	tlsConn := tls.Client(conn, &tls.Config{
-		ServerName: toID,
+		ServerName: m.cert.NumericIdentityToSNI(ar.remoteIdentity),
 		GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
 			return cert, nil
 		},
@@ -106,7 +112,8 @@ func (m *mtlsAuthHandler) authenticate(fromIP, fromID, toIP, toID string) error 
 				chain = append(chain, cert)
 			}
 
-			return m.verifyPeerCertificate(toID, caBundle, [][]*x509.Certificate{chain})
+			expirationTime, err = m.verifyPeerCertificate(&ar.remoteIdentity, caBundle, [][]*x509.Certificate{chain})
+			return err
 		},
 		ClientCAs: caBundle,
 		RootCAs:   caBundle,
@@ -115,12 +122,18 @@ func (m *mtlsAuthHandler) authenticate(fromIP, fromID, toIP, toID string) error 
 	defer tlsConn.Close()
 
 	if err := tlsConn.Handshake(); err != nil {
-		return fmt.Errorf("Failed to perform TLS handshake: %w", err)
+		return nil, fmt.Errorf("Failed to perform TLS handshake: %w", err)
+	}
+
+	if expirationTime == nil {
+		return nil, errors.New("Failed to get expiration time of peer certificate")
 	}
 
 	m.log.WithField("remote-addr", tlsConn.RemoteAddr()).Info("mTLS handshake successful, go Cilium Service Mesh!")
 
-	return nil
+	return &authResponse{
+		expirationTime: *expirationTime,
+	}, nil
 }
 
 func (m *mtlsAuthHandler) authType() policy.AuthType {
@@ -161,7 +174,8 @@ func (m *mtlsAuthHandler) handleConnection(ctx context.Context, conn net.Conn) {
 		ClientAuth:     tls.RequireAndVerifyClientCert,
 		GetCertificate: m.GetCertificateForConnection,
 		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-			return m.verifyPeerCertificate("", caBundle, verifiedChains)
+			_, err := m.verifyPeerCertificate(nil, caBundle, verifiedChains)
+			return err
 		},
 		ClientCAs: caBundle,
 	})
@@ -174,19 +188,23 @@ func (m *mtlsAuthHandler) handleConnection(ctx context.Context, conn net.Conn) {
 
 	// MAARTJE? Some thing else? Maybe saying hello? How unfriendly do we want our mTLS to be?
 	// Terrible idea: send a random joke in case the other agent is having a bad day
-
 }
 
 func (m *mtlsAuthHandler) GetCertificateForConnection(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	m.log.WithField("SNI", info.ServerName).Debug("Got new TLS connection")
-	return m.cert.GetCertificateForIdentity(info.ServerName)
+	id, err := m.cert.SNIToNumericIdentity(info.ServerName)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get identity for SNI %s: %w", info.ServerName, err)
+	}
+
+	return m.cert.GetCertificateForNumericIdentity(id)
 }
 
 func (m *mtlsAuthHandler) onStart(ctx hive.HookContext) error {
 	m.log.Info("Starting mTLS auth handler")
 
 	go m.listenForConnections(context.TODO())
-	go m.havingFun()
+	// go m.havingFun()
 	return nil
 }
 
@@ -206,18 +224,29 @@ func (m *mtlsAuthHandler) havingFun() {
 
 		m.log.WithField("from", fromID).WithField("to", toID).Debug("Doing mTLS handshake")
 
-		err := m.authenticate("127.0.0.1", fmt.Sprintf("%d", fromID), "127.0.0.1", fmt.Sprintf("%d", toID))
-		if err != nil {
+		localhost := net.ParseIP("127.0.0.1")
+
+		auth, err := m.authenticate(&authRequest{
+			localIdentity:  identity.NumericIdentity(fromID),
+			remoteIdentity: identity.NumericIdentity(toID),
+			remoteHostIP:   localhost,
+		})
+		if err != nil || auth == nil {
 			m.log.WithError(err).Error("Failed to authenticate()")
+			continue
 		}
+		m.log.WithField("expiration", auth.expirationTime).Debug("mTLS handshake successful")
 	}
 }
 
 // verifyPeerCertificate this is used for Go's TLS library to verify certificates
-func (m *mtlsAuthHandler) verifyPeerCertificate(sni string, caBundle *x509.CertPool, verifiedChains [][]*x509.Certificate) error {
+func (m *mtlsAuthHandler) verifyPeerCertificate(id *identity.NumericIdentity, caBundle *x509.CertPool, verifiedChains [][]*x509.Certificate) (*time.Time, error) {
 	if len(verifiedChains) == 0 {
-		return errors.New("No verified chains found")
+		return nil, errors.New("No verified chains found")
 	}
+
+	var expirationTime *time.Time
+
 	for _, chain := range verifiedChains {
 		opts := x509.VerifyOptions{
 			Roots:         caBundle,
@@ -233,23 +262,25 @@ func (m *mtlsAuthHandler) verifyPeerCertificate(sni string, caBundle *x509.CertP
 			}
 		}
 		if leaf == nil {
-			return fmt.Errorf("No leaf certificate found")
+			return nil, fmt.Errorf("No leaf certificate found")
 		}
 		if _, err := leaf.Verify(opts); err != nil {
-			return fmt.Errorf("Failed to verify certificate: %w", err)
+			return nil, fmt.Errorf("Failed to verify certificate: %w", err)
 		}
 
-		if sni != "" { // this will be empty in the peer connection
-			m.log.WithField("SNI", sni).Debug("Validating Server SNI")
-			if valid, err := m.cert.ValidateIdentity(sni, leaf); err != nil {
-				return fmt.Errorf("Failed to validate SAN: %w", err)
+		if id != nil { // this will be empty in the peer connection
+			m.log.WithField("SNI ID", id.String()).Debug("Validating Server SNI")
+			if valid, err := m.cert.ValidateIdentity(*id, leaf); err != nil {
+				return nil, fmt.Errorf("Failed to validate SAN: %w", err)
 			} else if !valid {
-				return errors.New("Unable to validate SAN")
+				return nil, errors.New("Unable to validate SAN")
 			}
 		}
+
+		expirationTime = &leaf.NotAfter
 
 		m.log.WithField("uri-san", leaf.URIs).Debug("Validated certificate")
 	}
 
-	return nil
+	return expirationTime, nil
 }
