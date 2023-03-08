@@ -1383,14 +1383,6 @@ func createBootstrap(filePath string, nodeId, cluster string, xdsSock, egressClu
 	}
 }
 
-func getCiliumTLSContext(tls *policy.TLSContext) *cilium.TLSContext {
-	return &cilium.TLSContext{
-		TrustedCa:        tls.TrustedCA,
-		CertificateChain: tls.CertificateChain,
-		PrivateKey:       tls.PrivateKey,
-	}
-}
-
 func GetEnvoyHTTPRules(secretManager certificatemanager.SecretManager, l7Rules *api.L7Rules, ns string) (*cilium.HttpNetworkPolicyRules, bool) {
 	if len(l7Rules.HTTP) > 0 { // Just cautious. This should never be false.
 		// Assume none of the rules have side-effects so that rule evaluation can
@@ -1437,10 +1429,14 @@ func getPortNetworkPolicyRule(sel policy.CachedSelector, wildcard bool, l7Parser
 	}
 
 	if l7Rules.TerminatingTLS != nil {
-		r.DownstreamTlsContext = getCiliumTLSContext(l7Rules.TerminatingTLS)
+		// FROM HERE ON PROTOBUF IS CHANGED
+		// r.DownstreamTlsContext = getCiliumTLSContext(l7Rules.TerminatingTLS)
 	}
 	if l7Rules.OriginatingTLS != nil {
-		r.UpstreamTlsContext = getCiliumTLSContext(l7Rules.OriginatingTLS)
+		// r.UpstreamTlsContext = getCiliumTLSContext(l7Rules.OriginatingTLS)
+
+		// here we should inject the secret name with the fillXDSPaths function
+
 	}
 	if len(l7Rules.ServerNames) > 0 {
 		r.ServerNames = make([]string, 0, len(l7Rules.ServerNames))

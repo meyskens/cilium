@@ -1591,7 +1591,6 @@ type daemonParams struct {
 	CacheStatus          k8s.CacheStatus
 	NodeManager          nodeManager.NodeManager
 	EndpointManager      endpointmanager.EndpointManager
-	CertManager          certificatemanager.CertificateManager
 	SecretManager        certificatemanager.SecretManager
 	AuthManager          auth.Manager
 	IdentityAllocator    CachingIdentityAllocator

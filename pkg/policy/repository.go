@@ -4,9 +4,7 @@
 package policy
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -35,11 +33,6 @@ type PolicyContext interface {
 
 	// return the SelectorCache
 	GetSelectorCache() *SelectorCache
-
-	// GetTLSContext resolves the given 'api.TLSContext' into CA
-	// certs and the public and private keys, using secrets from
-	// k8s or from the local file system.
-	GetTLSContext(tls *api.TLSContext) (ca, public, private string, err error)
 
 	// GetEnvoyHTTPRules translates the given 'api.L7Rules' into
 	// the protobuf representation the Envoy can consume. The bool
@@ -75,14 +68,6 @@ func (p *policyContext) GetNamespace() string {
 // GetSelectorCache() returns the selector cache used by the Repository
 func (p *policyContext) GetSelectorCache() *SelectorCache {
 	return p.repo.GetSelectorCache()
-}
-
-// GetTLSContext() returns data for TLS Context via a CertificateManager
-func (p *policyContext) GetTLSContext(tls *api.TLSContext) (ca, public, private string, err error) {
-	if p.repo.certManager == nil {
-		return "", "", "", fmt.Errorf("No Certificate Manager set on Policy Repository")
-	}
-	return p.repo.certManager.GetTLSContext(context.TODO(), tls, p.ns)
 }
 
 func (p *policyContext) GetEnvoyHTTPRules(l7Rules *api.L7Rules) (*cilium.HttpNetworkPolicyRules, bool) {
@@ -133,7 +118,6 @@ type Repository struct {
 	// PolicyCache tracks the selector policies created from this repo
 	policyCache *PolicyCache
 
-	certManager   certificatemanager.CertificateManager
 	secretManager certificatemanager.SecretManager
 
 	getEnvoyHTTPRules func(certificatemanager.SecretManager, *api.L7Rules, string) (*cilium.HttpNetworkPolicyRules, bool)
@@ -164,10 +148,9 @@ func (p *Repository) GetPolicyCache() *PolicyCache {
 func NewPolicyRepository(
 	idAllocator cache.IdentityAllocator,
 	idCache cache.IdentityCache,
-	certManager certificatemanager.CertificateManager,
 	secretManager certificatemanager.SecretManager,
 ) *Repository {
-	repo := NewStoppedPolicyRepository(idAllocator, idCache, certManager, secretManager)
+	repo := NewStoppedPolicyRepository(idAllocator, idCache, secretManager)
 	repo.Start()
 	return repo
 }
@@ -180,14 +163,12 @@ func NewPolicyRepository(
 func NewStoppedPolicyRepository(
 	idAllocator cache.IdentityAllocator,
 	idCache cache.IdentityCache,
-	certManager certificatemanager.CertificateManager,
 	secretManager certificatemanager.SecretManager,
 ) *Repository {
 	selectorCache := NewSelectorCache(idAllocator, idCache)
 	repo := &Repository{
 		revision:      1,
 		selectorCache: selectorCache,
-		certManager:   certManager,
 		secretManager: secretManager,
 	}
 	repo.policyCache = NewPolicyCache(repo, true)

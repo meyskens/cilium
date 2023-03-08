@@ -91,36 +91,6 @@ func __canSkip(currentRule *PerSelectorPolicy, wildcardRule *PerSelectorPolicy) 
 	return ok
 }
 
-// TLS context holds the secret values resolved from an 'api.TLSContext'
-type TLSContext struct {
-	TrustedCA        string `json:"trustedCA,omitempty"`
-	CertificateChain string `json:"certificateChain,omitempty"`
-	PrivateKey       string `json:"privateKey,omitempty"`
-}
-
-// Equal returns true if 'a' and 'b' have the same contents.
-func (a *TLSContext) Equal(b *TLSContext) bool {
-	return a == nil && b == nil || a != nil && b != nil && *a == *b
-}
-
-// MarshalJSON marsahls a redacted version of the TLSContext. We want
-// to see which fields are present, but not reveal their values in any
-// logs, etc.
-func (t *TLSContext) MarshalJSON() ([]byte, error) {
-	type tlsContext TLSContext
-	var redacted tlsContext
-	if t.TrustedCA != "" {
-		redacted.TrustedCA = "[redacted]"
-	}
-	if t.CertificateChain != "" {
-		redacted.CertificateChain = "[redacted]"
-	}
-	if t.PrivateKey != "" {
-		redacted.PrivateKey = "[redacted]"
-	}
-	return json.Marshal(&redacted)
-}
-
 type StringSet map[string]struct{}
 
 func (a StringSet) Equal(b StringSet) bool {
@@ -169,7 +139,7 @@ type PerSelectorPolicy struct {
 	// POD and terminated by the L7 proxy. For ingress policy this specifies
 	// the server-side TLS parameters to be applied on the connections
 	// originated from a remote source and terminated by the L7 proxy.
-	TerminatingTLS *TLSContext `json:"terminatingTLS,omitempty"`
+	TerminatingTLS *api.TLSContext `json:"terminatingTLS,omitempty"`
 
 	// OriginatingTLS is the TLS context for the connections originated by
 	// the L7 proxy.  For egress policy this specifies the client-side TLS
@@ -177,7 +147,7 @@ type PerSelectorPolicy struct {
 	// to the remote destination. For ingress policy this specifies the
 	// client-side TLS parameters for the connection from the L7 proxy to
 	// the local POD.
-	OriginatingTLS *TLSContext `json:"originatingTLS,omitempty"`
+	OriginatingTLS *api.TLSContext `json:"originatingTLS,omitempty"`
 
 	// ServerNames is a list of allowed TLS SNI values. If not empty, then
 	// TLS must be present and one of the provided SNIs must be indicated in the
@@ -207,8 +177,8 @@ type PerSelectorPolicy struct {
 // Equal returns true if 'a' and 'b' represent the same L7 Rules
 func (a *PerSelectorPolicy) Equal(b *PerSelectorPolicy) bool {
 	return a == nil && b == nil || a != nil && b != nil &&
-		a.TerminatingTLS.Equal(b.TerminatingTLS) &&
-		a.OriginatingTLS.Equal(b.OriginatingTLS) &&
+		a.TerminatingTLS.DeepEqual(b.TerminatingTLS) &&
+		a.OriginatingTLS.DeepEqual(b.OriginatingTLS) &&
 		a.ServerNames.Equal(b.ServerNames) &&
 		a.isRedirect == b.isRedirect &&
 		a.Auth.DeepEqual(b.Auth) &&
@@ -673,35 +643,6 @@ const (
 	OriginatingTLS TLSDirection = "originating"
 )
 
-func (l4 *L4Filter) getCerts(policyCtx PolicyContext, tls *api.TLSContext, direction TLSDirection) (*TLSContext, error) {
-	if tls == nil {
-		return nil, nil
-	}
-	ca, public, private, err := policyCtx.GetTLSContext(tls)
-	if err != nil {
-		log.WithError(err).Warningf("policy: Error getting %s TLS Context.", direction)
-		return nil, err
-	}
-	switch direction {
-	case TerminatingTLS:
-		if public == "" || private == "" {
-			return nil, fmt.Errorf("Terminating TLS context is missing certs.")
-		}
-	case OriginatingTLS:
-		if ca == "" {
-			return nil, fmt.Errorf("Originating TLS context is missing CA certs.")
-		}
-	default:
-		return nil, fmt.Errorf("invalid TLS direction: %s", direction)
-	}
-
-	return &TLSContext{
-		TrustedCA:        ca,
-		CertificateChain: public,
-		PrivateKey:       private,
-	}, nil
-}
-
 // createL4Filter creates a filter for L4 policy that applies to the specified
 // endpoints and port/protocol, with reference to the original rules that the
 // filter is derived from. This filter may be associated with a series of L7
@@ -740,8 +681,6 @@ func createL4Filter(policyCtx PolicyContext, peerEndpoints api.EndpointSelectorS
 		l4.cacheFQDNSelectors(fqdns, selectorCache)
 	}
 
-	var terminatingTLS *TLSContext
-	var originatingTLS *TLSContext
 	var rules *api.L7Rules
 	var sni []string
 	forceRedirect := false
@@ -750,20 +689,9 @@ func createL4Filter(policyCtx PolicyContext, peerEndpoints api.EndpointSelectorS
 		rules = pr.Rules
 		sni = pr.ServerNames
 
-		// Get TLS contexts, if any
-		var err error
-		terminatingTLS, err = l4.getCerts(policyCtx, pr.TerminatingTLS, TerminatingTLS)
-		if err != nil {
-			return nil, err
-		}
-		originatingTLS, err = l4.getCerts(policyCtx, pr.OriginatingTLS, OriginatingTLS)
-		if err != nil {
-			return nil, err
-		}
-
 		// Set parser type to TLS, if TLS. This will be overridden by L7 below, if rules
 		// exists.
-		if terminatingTLS != nil || originatingTLS != nil || len(pr.ServerNames) > 0 {
+		if pr.TerminatingTLS != nil || pr.OriginatingTLS != nil || len(pr.ServerNames) > 0 {
 			l4.L7Parser = ParserTypeTLS
 		}
 
@@ -812,7 +740,7 @@ func createL4Filter(policyCtx PolicyContext, peerEndpoints api.EndpointSelectorS
 	}
 
 	if l4.L7Parser != ParserTypeNone || auth != nil || policyCtx.IsDeny() {
-		l4.PerSelectorPolicies.addPolicyForSelector(rules, terminatingTLS, originatingTLS, auth, policyCtx.IsDeny(), sni, forceRedirect)
+		l4.PerSelectorPolicies.addPolicyForSelector(rules, pr.TerminatingTLS, pr.OriginatingTLS, auth, policyCtx.IsDeny(), sni, forceRedirect)
 	}
 
 	for cs := range l4.PerSelectorPolicies {

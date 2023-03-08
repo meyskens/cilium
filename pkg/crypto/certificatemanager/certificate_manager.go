@@ -25,10 +25,6 @@ var Cell = cell.Module(
 	cell.Config(defaultManagerConfig),
 )
 
-type CertificateManager interface {
-	GetTLSContext(ctx context.Context, tlsCtx *api.TLSContext, ns string) (ca, public, private string, err error)
-}
-
 type SecretManager interface {
 	GetSecrets(ctx context.Context, secret *api.Secret, ns string) (string, map[string][]byte, error)
 	GetSecretString(ctx context.Context, secret *api.Secret, ns string) (string, error)
@@ -56,13 +52,13 @@ type manager struct {
 }
 
 // NewManager returns a new manager.
-func NewManager(cfg managerConfig, clientset k8sClient.Clientset) (CertificateManager, SecretManager) {
+func NewManager(cfg managerConfig, clientset k8sClient.Clientset) SecretManager {
 	m := &manager{
 		rootPath:  cfg.CertificatesDirectory,
 		k8sClient: clientset,
 	}
 
-	return m, m
+	return m
 }
 
 // GetSecrets returns either local or k8s secrets, giving precedence for local secrets if configured.
@@ -104,60 +100,6 @@ func (m *manager) GetSecrets(ctx context.Context, secret *api.Secret, ns string)
 	}
 	secrets, err := m.k8sClient.GetSecrets(ctx, ns, secret.Name)
 	return nsName, secrets, err
-}
-
-const (
-	caDefaultName      = "ca.crt"
-	publicDefaultName  = "tls.crt"
-	privateDefaultName = "tls.key"
-)
-
-// GetTLSContext returns a new ca, public and private certificates found based
-// in the given api.TLSContext.
-func (m *manager) GetTLSContext(ctx context.Context, tlsCtx *api.TLSContext, ns string) (ca, public, private string, err error) {
-	name, secrets, err := m.GetSecrets(ctx, tlsCtx.Secret, ns)
-	if err != nil {
-		return "", "", "", err
-	}
-
-	caName := caDefaultName
-	if tlsCtx.TrustedCA != "" {
-		caName = tlsCtx.TrustedCA
-	}
-	caBytes, ok := secrets[caName]
-	if ok {
-		ca = string(caBytes)
-	} else if tlsCtx.TrustedCA != "" {
-		return "", "", "", fmt.Errorf("Trusted CA %s not found in secret %s", caName, name)
-	}
-
-	publicName := publicDefaultName
-	if tlsCtx.Certificate != "" {
-		publicName = tlsCtx.Certificate
-	}
-	publicBytes, ok := secrets[publicName]
-	if ok {
-		public = string(publicBytes)
-	} else if tlsCtx.Certificate != "" {
-		return "", "", "", fmt.Errorf("Certificate %s not found in secret %s", publicName, name)
-	}
-
-	privateName := privateDefaultName
-	if tlsCtx.PrivateKey != "" {
-		privateName = tlsCtx.PrivateKey
-	}
-	privateBytes, ok := secrets[privateName]
-	if ok {
-		private = string(privateBytes)
-	} else if tlsCtx.PrivateKey != "" {
-		return "", "", "", fmt.Errorf("Private Key %s not found in secret %s", privateName, name)
-	}
-
-	if caBytes == nil && publicBytes == nil && privateBytes == nil {
-		return "", "", "", fmt.Errorf("TLS certificates not found in secret %s ", name)
-	}
-
-	return ca, public, private, nil
 }
 
 // GetSecretString returns a secret string stored in a k8s secret

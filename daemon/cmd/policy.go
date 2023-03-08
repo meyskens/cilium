@@ -71,7 +71,6 @@ type policyParams struct {
 
 	Lifecycle       hive.Lifecycle
 	EndpointManager endpointmanager.EndpointManager
-	CertManager     certificatemanager.CertificateManager
 	SecretManager   certificatemanager.SecretManager
 	Datapath        datapath.Datapath
 	CacheStatus     k8s.CacheStatus
