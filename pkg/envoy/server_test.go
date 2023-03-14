@@ -830,7 +830,7 @@ var L4PolicyTLSEgress = &policy.L4Policy{
 			L7Parser: "tls",
 			PerSelectorPolicies: policy.L7DataMap{
 				cachedSelector1: &policy.PerSelectorPolicy{
-					OriginatingTLS: &policy.TLSContext{
+					OriginatingTLS: &api.TLSContext{
 						TrustedCA: "foo",
 					},
 				},
@@ -869,9 +869,9 @@ var L4PolicyTLSIngress = &policy.L4Policy{
 			L7Parser: "tls",
 			PerSelectorPolicies: policy.L7DataMap{
 				cachedSelector1: &policy.PerSelectorPolicy{
-					OriginatingTLS: &policy.TLSContext{
-						CertificateChain: "certchain",
-						PrivateKey:       "key",
+					OriginatingTLS: &api.TLSContext{
+						Certificate: "certchain",
+						PrivateKey:  "key",
 					},
 				},
 			},
