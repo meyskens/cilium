@@ -11,6 +11,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
+	"github.com/cilium/cilium/operator/pkg/ciliumnetworkpolicy/helpers"
 	"github.com/cilium/cilium/operator/pkg/ingress/secrets"
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/k8s"
@@ -20,7 +21,6 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/types"
 	"github.com/cilium/cilium/pkg/k8s/utils"
 	"github.com/cilium/cilium/pkg/logging/logfields"
-	"github.com/cilium/cilium/pkg/policy/api"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/pflag"
 )
@@ -135,12 +135,13 @@ func newCNPWatcher(lc hive.Lifecycle, params CNPWatcherParams, opts CNPWatcherOp
 }
 
 func (c *CNPWatcher) onStart(ctx hive.HookContext) error {
-	secretManager, err := secrets.NewSyncSecretsManager(c.clientset, c.secretsNamespace, c.maxRetries)
+	secretManager, err := secrets.NewSyncSecretsManager(c.clientset, c.secretsNamespace, c.maxRetries, false)
 	if err != nil {
 		return err
 	}
 	c.secretManager = secretManager
 
+	go c.secretManager.Run()
 	go c.run()
 
 	return nil
@@ -185,62 +186,48 @@ func (c *CNPWatcher) processEvent() bool {
 }
 
 func (c *CNPWatcher) handleCiliumNetworkPolicyAddedEvent(event ciliumNetworkPolicyAddedEvent) error {
-	tlsContexts := c.getReferencedTLSContext(event.cnp)
-	if len(tlsContexts) == 0 {
+	if len(helpers.GetReferencedTLSContext(event.cnp)) == 0 && len(helpers.GetReferencedHeaderMatchSecrets(event.cnp)) == 0 {
 		// no secrets, no handling by us required
 		return nil
 	}
 
-	c.secretManager.Add(secrets.CNPWithTLSAddedEvent{
-		CNP:         event.cnp,
-		TLSContexts: tlsContexts,
+	c.secretManager.Add(secrets.CNPAddedEvent{
+		CNP: event.cnp,
 	})
 	return nil
 }
 
 func (c *CNPWatcher) handleCiliumNetworkPolicyUpdatedEvent(event ciliumNetworkPolicyUpdatedEvent) error {
 
-	oldTLSContexts := c.getReferencedTLSContext(event.oldCNP)
-	newTLSContexts := c.getReferencedTLSContext(event.newCNP)
+	oldTLSContexts := helpers.GetReferencedTLSContext(event.oldCNP)
+	newTLSContexts := helpers.GetReferencedTLSContext(event.newCNP)
 
-	if len(oldTLSContexts) == 0 && len(newTLSContexts) == 0 {
+	oldHeaderSecrets := helpers.GetReferencedHeaderMatchSecrets(event.oldCNP)
+	newHeaderSecrets := helpers.GetReferencedHeaderMatchSecrets(event.newCNP)
+
+	if len(oldTLSContexts) == 0 &&
+		len(newTLSContexts) == 0 &&
+		len(oldHeaderSecrets) == 0 &&
+		len(newHeaderSecrets) == 0 {
 		// no secrets, no handling by us required
 	}
 
-	equal := true
-	if len(oldTLSContexts) != len(newTLSContexts) {
-		equal = false
-	} else {
-		for i := range oldTLSContexts {
-			if !oldTLSContexts[i].DeepEqual(newTLSContexts[i]) {
-				equal = false
-				break
-			}
-		}
-	}
-
-	if !equal {
-		c.secretManager.Add(secrets.CNPWithTLSUpdatedEvent{
-			OldCNP:         event.oldCNP,
-			NewCNP:         event.newCNP,
-			OldTLSContexts: oldTLSContexts,
-			NewTLSContexts: newTLSContexts,
-		})
-	}
+	c.secretManager.Add(secrets.CNPUpdatedEvent{
+		OldCNP: event.oldCNP,
+		NewCNP: event.newCNP,
+	})
 
 	return nil
 }
 
 func (c *CNPWatcher) handleCiliumNetworkPolicyDeletedEvent(event ciliumNetworkPolicyDeletedEvent) error {
-	tlsContexts := c.getReferencedTLSContext(event.cnp)
-	if len(tlsContexts) == 0 {
+	if len(helpers.GetReferencedTLSContext(event.cnp)) == 0 && len(helpers.GetReferencedHeaderMatchSecrets(event.cnp)) == 0 {
 		// no secrets, no handling by us required
 		return nil
 	}
 
-	c.secretManager.Add(secrets.CNPWithTLSDeletedEvent{
-		CNP:         event.cnp,
-		TLSContexts: tlsContexts,
+	c.secretManager.Add(secrets.CNPDeletedEvent{
+		CNP: event.cnp,
 	})
 	return nil
 }
@@ -261,23 +248,4 @@ func (c *CNPWatcher) handleEvent(event interface{}) error {
 		err = fmt.Errorf("received an unknown event: %t", ev)
 	}
 	return err
-}
-
-func (c *CNPWatcher) getReferencedTLSContext(pol *types.SlimCNP) []*api.TLSContext {
-	var referencedTLS []*api.TLSContext
-
-	for _, rule := range pol.Spec.Egress {
-		for _, port := range rule.ToPorts {
-			// only list if there is a secret referenced in the TLS context
-			if port.OriginatingTLS != nil && port.OriginatingTLS.Secret != nil {
-				referencedTLS = append(referencedTLS, port.OriginatingTLS)
-			}
-
-			if port.TerminatingTLS != nil && port.TerminatingTLS.Secret != nil {
-				referencedTLS = append(referencedTLS, port.TerminatingTLS)
-			}
-		}
-	}
-
-	return referencedTLS
 }

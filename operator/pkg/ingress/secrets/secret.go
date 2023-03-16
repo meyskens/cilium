@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 
+	cnphelpers "github.com/cilium/cilium/operator/pkg/ciliumnetworkpolicy/helpers"
 	"github.com/cilium/cilium/pkg/k8s"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/k8s/informer"
@@ -70,23 +71,16 @@ type IngressDeletedEvent struct {
 	Ingress *slim_networkingv1.Ingress
 }
 
-type CNPWithTLSAddedEvent struct {
+type CNPAddedEvent struct {
 	CNP *types.SlimCNP
-
-	TLSContexts []*api.TLSContext
 }
-type CNPWithTLSUpdatedEvent struct {
+type CNPUpdatedEvent struct {
 	OldCNP *types.SlimCNP
 	NewCNP *types.SlimCNP
-
-	OldTLSContexts []*api.TLSContext
-	NewTLSContexts []*api.TLSContext
 }
 
-type CNPWithTLSDeletedEvent struct {
+type CNPDeletedEvent struct {
 	CNP *types.SlimCNP
-
-	TLSContexts []*api.TLSContext
 }
 
 type syncSecretManager struct {
@@ -120,7 +114,7 @@ func (n noOpsSecretManager) Run() {}
 func (n noOpsSecretManager) Add(event interface{}) {}
 
 // newSyncSecretsManager constructs a new secret manager instance
-func NewSyncSecretsManager(clientset k8sClient.Clientset, namespace string, maxRetries int) (SecretManager, error) {
+func NewSyncSecretsManager(clientset k8sClient.Clientset, namespace string, maxRetries int, tlsOnly bool) (SecretManager, error) {
 	manager := &syncSecretManager{
 		queue:              workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 		namespace:          namespace,
@@ -135,7 +129,9 @@ func NewSyncSecretsManager(clientset k8sClient.Clientset, namespace string, maxR
 			utils.ListerWatcherFromTyped[*slim_corev1.SecretList](clientset.Slim().CoreV1().Secrets(corev1.NamespaceAll)),
 			// only watch TLS secret
 			func(options *metav1.ListOptions) {
-				options.FieldSelector = tlsFieldSelector
+				if tlsOnly {
+					options.FieldSelector = tlsFieldSelector
+				}
 			}),
 		&slim_corev1.Secret{},
 		0,
@@ -215,7 +211,7 @@ func (sm *syncSecretManager) processEvent() bool {
 	} else if sm.queue.NumRequeues(event) < sm.maxRetries {
 		sm.queue.AddRateLimited(event)
 	} else {
-		log.Errorf("Failed to process Ingress event, skipping: %+v", event)
+		log.WithField("error", err).Errorf("Failed to process Ingress event, skipping: %+v", event)
 		sm.queue.Forget(event)
 	}
 	return true
@@ -238,12 +234,12 @@ func (sm *syncSecretManager) handleEvent(event interface{}) interface{} {
 	case IngressDeletedEvent:
 		err = sm.handleIngressDeletedEvent(ev)
 
-	case CNPWithTLSAddedEvent:
-		err = sm.handleCNPWithTLSAddedEvent(ev)
-	case CNPWithTLSUpdatedEvent:
-		err = sm.handleCNPWithTLSUpdatedEvent(ev)
-	case CNPWithTLSDeletedEvent:
-		err = sm.handleCNPWithTLSDeletedEvent(ev)
+	case CNPAddedEvent:
+		err = sm.handleCNPAddedEvent(ev)
+	case CNPUpdatedEvent:
+		err = sm.handleCNPUpdatedEvent(ev)
+	case CNPDeletedEvent:
+		err = sm.handleCNPDeletedEvent(ev)
 
 	default:
 		err = fmt.Errorf("received an unknown event: %t", ev)
@@ -312,26 +308,43 @@ func (sm *syncSecretManager) handleIngressUpsertedEvent(ingress *slim_networking
 	return nil
 }
 
-func (sm *syncSecretManager) handleCNPWithTLSAddedEvent(ev CNPWithTLSAddedEvent) error {
-	return sm.handleCNPWithTLSUpsertedEvent(ev.CNP, ev.TLSContexts)
+func (sm *syncSecretManager) handleCNPAddedEvent(ev CNPAddedEvent) error {
+	tlsContexts := cnphelpers.GetReferencedTLSContext(ev.CNP)
+	headerSecrets := cnphelpers.GetReferencedHeaderMatchSecrets(ev.CNP)
+	return sm.handleCNPUpsertedEvent(ev.CNP, tlsContexts, headerSecrets)
 }
 
-func (sm *syncSecretManager) handleCNPWithTLSUpdatedEvent(ev CNPWithTLSUpdatedEvent) error {
-	return sm.handleCNPWithTLSUpsertedEvent(ev.NewCNP, ev.NewTLSContexts)
+func (sm *syncSecretManager) handleCNPUpdatedEvent(ev CNPUpdatedEvent) error {
+	tlsContexts := cnphelpers.GetReferencedTLSContext(ev.NewCNP)
+	headerSecrets := cnphelpers.GetReferencedHeaderMatchSecrets(ev.NewCNP)
+	return sm.handleCNPUpsertedEvent(ev.NewCNP, tlsContexts, headerSecrets)
 }
 
-func (sm *syncSecretManager) handleCNPWithTLSDeletedEvent(ev CNPWithTLSDeletedEvent) error {
+func (sm *syncSecretManager) handleCNPDeletedEvent(ev CNPDeletedEvent) error {
 	return nil
 }
 
-func (sm *syncSecretManager) handleCNPWithTLSUpsertedEvent(cnp *types.SlimCNP, tlsContexts []*api.TLSContext) error {
+func (sm *syncSecretManager) handleCNPUpsertedEvent(cnp *types.SlimCNP, tlsContexts []*api.TLSContext, secrets []*api.Secret) error {
 	for _, t := range tlsContexts {
 		if t.Secret == nil {
 			continue
 		}
 
+		secrets = append(secrets, t.Secret)
+
+		sm.lock.Lock()
+		sm.watchedTLSContexts[getSecretKey(t.Secret.Namespace, t.Secret.Name)] = t
+		sm.lock.Unlock()
+	}
+
+	for _, s := range secrets {
+		key := getSecretKey(s.Namespace, s.Name)
+
+		sm.lock.Lock()
+		sm.watchedSecretMap[key] = getSyncedSecretKey(sm.namespace, s.Namespace, s.Name)
+		sm.lock.Unlock()
+
 		// check if the secret is available
-		key := getSecretKey(cnp.Namespace, t.Secret.Name)
 		secret, exists, err := sm.getByKey(key)
 		if err != nil {
 			return err
@@ -339,11 +352,6 @@ func (sm *syncSecretManager) handleCNPWithTLSUpsertedEvent(cnp *types.SlimCNP, t
 		if !exists {
 			return fmt.Errorf("secret does not exist: %s", key)
 		}
-
-		sm.lock.Lock()
-		sm.watchedSecretMap[key] = getSyncedSecretKey(sm.namespace, secret.GetNamespace(), secret.GetName())
-		sm.watchedTLSContexts[key] = t
-		sm.lock.Unlock()
 
 		// proceed to sync secret
 		err = sm.syncSecret(secret)

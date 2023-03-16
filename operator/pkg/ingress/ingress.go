@@ -180,7 +180,7 @@ func NewController(clientset k8sClient.Clientset, options ...Option) (*Controlle
 
 	ic.secretManager = secrets.NewNoOpsSecretManager()
 	if ic.enabledSecretsSync {
-		secretManager, err := secrets.NewSyncSecretsManager(clientset, opts.SecretsNamespace, opts.MaxRetries)
+		secretManager, err := secrets.NewSyncSecretsManager(clientset, opts.SecretsNamespace, opts.MaxRetries, true)
 		if err != nil {
 			return nil, err
 		}
