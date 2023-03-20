@@ -7,7 +7,6 @@ import (
 	"github.com/cilium/cilium/daemon/cmd/cni"
 	"github.com/cilium/cilium/pkg/auth"
 	"github.com/cilium/cilium/pkg/bgpv1"
-	"github.com/cilium/cilium/pkg/crypto/certificatemanager"
 	"github.com/cilium/cilium/pkg/datapath"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/egressgateway"
@@ -79,9 +78,6 @@ var (
 
 		// NodeManager maintains a collection of other nodes in the cluster.
 		nodeManager.Cell,
-
-		// Certificate manager provides an API for retrieving secrets and certificate in the form of TLS contexts.
-		certificatemanager.Cell,
 
 		// daemonCell wraps the legacy daemon initialization and provides Promise[*Daemon].
 		daemonCell,

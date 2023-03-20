@@ -19,7 +19,6 @@ import (
 	. "github.com/cilium/cilium/api/v1/server/restapi/policy"
 	"github.com/cilium/cilium/pkg/api"
 	"github.com/cilium/cilium/pkg/auth"
-	"github.com/cilium/cilium/pkg/crypto/certificatemanager"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
@@ -71,7 +70,6 @@ type policyParams struct {
 
 	Lifecycle       hive.Lifecycle
 	EndpointManager endpointmanager.EndpointManager
-	SecretManager   certificatemanager.SecretManager
 	Datapath        datapath.Datapath
 	CacheStatus     k8s.CacheStatus
 }
@@ -100,8 +98,6 @@ func newPolicyTrifecta(params policyParams) (policyOut, error) {
 	iao.policy = policy.NewStoppedPolicyRepository(
 		idAlloc,
 		idAlloc.GetIdentityCache(),
-		params.CertManager,
-		params.SecretManager,
 	)
 	iao.policy.SetEnvoyRulesFunc(envoy.GetEnvoyHTTPRules)
 

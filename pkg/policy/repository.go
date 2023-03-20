@@ -12,7 +12,6 @@ import (
 	cilium "github.com/cilium/proxy/go/cilium/api"
 
 	"github.com/cilium/cilium/api/v1/models"
-	"github.com/cilium/cilium/pkg/crypto/certificatemanager"
 	"github.com/cilium/cilium/pkg/eventqueue"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/identity/cache"
@@ -118,9 +117,7 @@ type Repository struct {
 	// PolicyCache tracks the selector policies created from this repo
 	policyCache *PolicyCache
 
-	secretManager certificatemanager.SecretManager
-
-	getEnvoyHTTPRules func(certificatemanager.SecretManager, *api.L7Rules, string) (*cilium.HttpNetworkPolicyRules, bool)
+	getEnvoyHTTPRules func(*api.L7Rules, string) (*cilium.HttpNetworkPolicyRules, bool)
 }
 
 // GetSelectorCache() returns the selector cache used by the Repository
@@ -128,7 +125,7 @@ func (p *Repository) GetSelectorCache() *SelectorCache {
 	return p.selectorCache
 }
 
-func (p *Repository) SetEnvoyRulesFunc(f func(certificatemanager.SecretManager, *api.L7Rules, string) (*cilium.HttpNetworkPolicyRules, bool)) {
+func (p *Repository) SetEnvoyRulesFunc(f func(*api.L7Rules, string) (*cilium.HttpNetworkPolicyRules, bool)) {
 	p.getEnvoyHTTPRules = f
 }
 
@@ -136,7 +133,7 @@ func (p *Repository) GetEnvoyHTTPRules(l7Rules *api.L7Rules, ns string) (*cilium
 	if p.getEnvoyHTTPRules == nil {
 		return nil, true
 	}
-	return p.getEnvoyHTTPRules(p.secretManager, l7Rules, ns)
+	return p.getEnvoyHTTPRules(l7Rules, ns)
 }
 
 // GetPolicyCache() returns the policy cache used by the Repository
@@ -148,9 +145,8 @@ func (p *Repository) GetPolicyCache() *PolicyCache {
 func NewPolicyRepository(
 	idAllocator cache.IdentityAllocator,
 	idCache cache.IdentityCache,
-	secretManager certificatemanager.SecretManager,
 ) *Repository {
-	repo := NewStoppedPolicyRepository(idAllocator, idCache, secretManager)
+	repo := NewStoppedPolicyRepository(idAllocator, idCache)
 	repo.Start()
 	return repo
 }
@@ -163,13 +159,11 @@ func NewPolicyRepository(
 func NewStoppedPolicyRepository(
 	idAllocator cache.IdentityAllocator,
 	idCache cache.IdentityCache,
-	secretManager certificatemanager.SecretManager,
 ) *Repository {
 	selectorCache := NewSelectorCache(idAllocator, idCache)
 	repo := &Repository{
 		revision:      1,
 		selectorCache: selectorCache,
-		secretManager: secretManager,
 	}
 	repo.policyCache = NewPolicyCache(repo, true)
 	return repo

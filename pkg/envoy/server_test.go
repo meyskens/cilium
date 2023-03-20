@@ -458,7 +458,7 @@ var L4Policy2 = &policy.L4Policy{
 }
 
 func (s *ServerSuite) TestGetHTTPRule(c *C) {
-	obtained, canShortCircuit := getHTTPRule(nil, PortRuleHTTP1, "")
+	obtained, canShortCircuit := getHTTPRule(PortRuleHTTP1, "")
 	c.Assert(obtained.Headers, checker.ExportedEquals, ExpectedHeaders1)
 	c.Assert(canShortCircuit, Equals, true)
 }
