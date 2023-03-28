@@ -149,6 +149,9 @@ type XDSServer struct {
 
 	// stopServer stops the xDS gRPC server.
 	stopServer context.CancelFunc
+
+	// secretsNamespace is the namespace where the secrets are stored.
+	secretsNamespace string
 }
 
 func getXDSPath(stateDir string) string {
@@ -164,7 +167,7 @@ func toAny(pb proto.Message) *anypb.Any {
 }
 
 // StartXDSServer configures and starts the xDS GRPC server.
-func StartXDSServer(ipcache IPCacheEventSource, stateDir string) *XDSServer {
+func StartXDSServer(ipcache IPCacheEventSource, stateDir, secretsNamespace string) *XDSServer {
 	xdsPath := getXDSPath(stateDir)
 
 	os.Remove(xdsPath)
@@ -254,6 +257,7 @@ func StartXDSServer(ipcache IPCacheEventSource, stateDir string) *XDSServer {
 		NetworkPolicyMutator:   npdsMutator,
 		networkPolicyEndpoints: make(map[string]logger.EndpointUpdater),
 		stopServer:             stopServer,
+		secretsNamespace:       secretsNamespace,
 	}
 }
 
@@ -1016,7 +1020,7 @@ func getKafkaL7Rules(l7Rules []kafka.PortRule) *cilium.KafkaNetworkPolicyRules {
 	return rules
 }
 
-func getHTTPRule(h *api.PortRuleHTTP, ns string) (*cilium.HttpNetworkPolicyRule, bool) {
+func getHTTPRule(h *api.PortRuleHTTP, ns, secretsNS string) (*cilium.HttpNetworkPolicyRule, bool) {
 	// Count the number of header matches we need
 	cnt := len(h.Headers) + len(h.HeaderMatches)
 	if h.Path != "" {
@@ -1121,12 +1125,18 @@ func getHTTPRule(h *api.PortRuleHTTP, ns string) (*cilium.HttpNetworkPolicyRule,
 				})
 			}
 		} else {
-			headerMatches = append(headerMatches, &cilium.HeaderMatch{
+
+			hm := &cilium.HeaderMatch{
 				MismatchAction: mismatch_action,
 				Name:           hdr.Name,
 				Value:          hdr.Value,
-				ValueSdsSecret: "TODO CONVERT TO SECRET",
-			})
+			}
+			if hdr.Secret != nil {
+				hm.ValueSdsSecret = fmt.Sprintf("%s/%s-%s", secretsNS, hdr.Secret.Namespace, hdr.Secret.Name)
+			}
+
+			headerMatches = append(headerMatches, hm)
+
 		}
 	}
 	if len(headers) == 0 {
@@ -1344,7 +1354,7 @@ func createBootstrap(filePath string, nodeId, cluster string, xdsSock, egressClu
 	}
 }
 
-func GetEnvoyHTTPRules(l7Rules *api.L7Rules, ns string) (*cilium.HttpNetworkPolicyRules, bool) {
+func GetEnvoyHTTPRules(l7Rules *api.L7Rules, ns, secretsNS string) (*cilium.HttpNetworkPolicyRules, bool) {
 	if len(l7Rules.HTTP) > 0 { // Just cautious. This should never be false.
 		// Assume none of the rules have side-effects so that rule evaluation can
 		// be stopped as soon as the first allowing rule is found. 'canShortCircuit'
@@ -1354,7 +1364,7 @@ func GetEnvoyHTTPRules(l7Rules *api.L7Rules, ns string) (*cilium.HttpNetworkPoli
 		httpRules := make([]*cilium.HttpNetworkPolicyRule, 0, len(l7Rules.HTTP))
 		for _, l7 := range l7Rules.HTTP {
 			var cs bool
-			rule, cs := getHTTPRule(&l7, ns)
+			rule, cs := getHTTPRule(&l7, ns, secretsNS)
 			httpRules = append(httpRules, rule)
 			if !cs {
 				canShortCircuit = false
@@ -1368,7 +1378,7 @@ func GetEnvoyHTTPRules(l7Rules *api.L7Rules, ns string) (*cilium.HttpNetworkPoli
 	return nil, true
 }
 
-func getPortNetworkPolicyRule(sel policy.CachedSelector, wildcard bool, l7Parser policy.L7ParserType, l7Rules *policy.PerSelectorPolicy) (*cilium.PortNetworkPolicyRule, bool) {
+func getPortNetworkPolicyRule(sel policy.CachedSelector, wildcard bool, l7Parser policy.L7ParserType, l7Rules *policy.PerSelectorPolicy, secretsNamespace string) (*cilium.PortNetworkPolicyRule, bool) {
 	r := &cilium.PortNetworkPolicyRule{}
 
 	// Optimize the policy if the endpoint selector is a wildcard by
@@ -1389,15 +1399,28 @@ func getPortNetworkPolicyRule(sel policy.CachedSelector, wildcard bool, l7Parser
 		return r, true
 	}
 
-	if l7Rules.TerminatingTLS != nil {
-		// FROM HERE ON PROTOBUF IS CHANGED
-		// r.DownstreamTlsContext = getCiliumTLSContext(l7Rules.TerminatingTLS)
+	if l7Rules.TerminatingTLS != nil && l7Rules.TerminatingTLS.Secret != nil {
+		r.DownstreamTlsContext = &cilium.TLSContext{
+			ValidationContextSdsSecret: fmt.Sprintf("%s/%s-%s", secretsNamespace, l7Rules.TerminatingTLS.Secret.Namespace, l7Rules.TerminatingTLS.Secret.Name),
+		}
+	} else if l7Rules.TerminatingTLS != nil {
+		// MAARTJE: are these content or file name paths... IDK
+		r.DownstreamTlsContext = &cilium.TLSContext{
+			CertificateChain: l7Rules.TerminatingTLS.Certificate,
+			PrivateKey:       l7Rules.TerminatingTLS.PrivateKey,
+			TrustedCa:        l7Rules.TerminatingTLS.TrustedCA,
+		}
 	}
-	if l7Rules.OriginatingTLS != nil {
-		// r.UpstreamTlsContext = getCiliumTLSContext(l7Rules.OriginatingTLS)
-
-		// here we should inject the secret name with the fillXDSPaths function
-
+	if l7Rules.OriginatingTLS != nil && l7Rules.OriginatingTLS.Secret != nil {
+		r.UpstreamTlsContext = &cilium.TLSContext{
+			ValidationContextSdsSecret: fmt.Sprintf("%s/%s-%s", secretsNamespace, l7Rules.OriginatingTLS.Secret.Namespace, l7Rules.OriginatingTLS.Secret.Name),
+		}
+	} else if l7Rules.OriginatingTLS != nil {
+		r.UpstreamTlsContext = &cilium.TLSContext{
+			CertificateChain: l7Rules.OriginatingTLS.Certificate,
+			PrivateKey:       l7Rules.OriginatingTLS.PrivateKey,
+			TrustedCa:        l7Rules.OriginatingTLS.TrustedCA,
+		}
 	}
 	if len(l7Rules.ServerNames) > 0 {
 		r.ServerNames = make([]string, 0, len(l7Rules.ServerNames))
@@ -1423,7 +1446,7 @@ func getPortNetworkPolicyRule(sel policy.CachedSelector, wildcard bool, l7Parser
 				httpRules = l7Rules.EnvoyHTTPRules
 				canShortCircuit = l7Rules.CanShortCircuit
 			} else {
-				httpRules, canShortCircuit = GetEnvoyHTTPRules(&l7Rules.L7Rules, "")
+				httpRules, canShortCircuit = GetEnvoyHTTPRules(&l7Rules.L7Rules, "", secretsNamespace)
 			}
 			r.L7 = &cilium.PortNetworkPolicyRule_HttpRules{
 				HttpRules: httpRules,
@@ -1526,7 +1549,7 @@ func getWildcardNetworkPolicyRule(selectors policy.L7DataMap) *cilium.PortNetwor
 	}
 }
 
-func getDirectionNetworkPolicy(ep logger.EndpointUpdater, l4Policy policy.L4PolicyMap, policyEnforced bool, vis policy.DirectionalVisibilityPolicy, dir string) []*cilium.PortNetworkPolicy {
+func getDirectionNetworkPolicy(ep logger.EndpointUpdater, l4Policy policy.L4PolicyMap, policyEnforced bool, vis policy.DirectionalVisibilityPolicy, dir, secretsNamespace string) []*cilium.PortNetworkPolicy {
 	// TODO: integrate visibility with enforced policy
 	if !policyEnforced {
 		PerPortPolicies := make([]*cilium.PortNetworkPolicy, 0, len(vis))
@@ -1608,7 +1631,7 @@ func getDirectionNetworkPolicy(ep logger.EndpointUpdater, l4Policy policy.L4Poli
 				// then the proxy may need to drop some allowed l3 due to l7 rules potentially
 				// being different between the selectors.
 				wildcard := nSelectors == 1 || sel.IsWildcard()
-				rule, cs := getPortNetworkPolicyRule(sel, wildcard, l4.L7Parser, l7)
+				rule, cs := getPortNetworkPolicyRule(sel, wildcard, l4.L7Parser, l7, secretsNamespace)
 				if rule != nil {
 					if !cs {
 						canShortCircuit = false
@@ -1661,7 +1684,7 @@ func getDirectionNetworkPolicy(ep logger.EndpointUpdater, l4Policy policy.L4Poli
 
 // getNetworkPolicy converts a network policy into a cilium.NetworkPolicy.
 func getNetworkPolicy(ep logger.EndpointUpdater, vis *policy.VisibilityPolicy, ips []string, l4Policy *policy.L4Policy,
-	ingressPolicyEnforced, egressPolicyEnforced bool) *cilium.NetworkPolicy {
+	ingressPolicyEnforced, egressPolicyEnforced bool, secretsNamespace string) *cilium.NetworkPolicy {
 	p := &cilium.NetworkPolicy{
 		EndpointIps:      ips,
 		EndpointId:       ep.GetID(),
@@ -1675,8 +1698,8 @@ func getNetworkPolicy(ep logger.EndpointUpdater, vis *policy.VisibilityPolicy, i
 			visIngress = vis.Ingress
 			visEgress = vis.Egress
 		}
-		p.IngressPerPortPolicies = getDirectionNetworkPolicy(ep, l4Policy.Ingress, ingressPolicyEnforced, visIngress, "ingress")
-		p.EgressPerPortPolicies = getDirectionNetworkPolicy(ep, l4Policy.Egress, egressPolicyEnforced, visEgress, "egress")
+		p.IngressPerPortPolicies = getDirectionNetworkPolicy(ep, l4Policy.Ingress, ingressPolicyEnforced, visIngress, "ingress", secretsNamespace)
+		p.EgressPerPortPolicies = getDirectionNetworkPolicy(ep, l4Policy.Egress, egressPolicyEnforced, visEgress, "egress", secretsNamespace)
 	}
 	return p
 }
@@ -1738,7 +1761,8 @@ func (s *XDSServer) UpdateNetworkPolicy(ep logger.EndpointUpdater, vis *policy.V
 		return nil, func() error { return nil }
 	}
 
-	networkPolicy := getNetworkPolicy(ep, vis, ips, policy, ingressPolicyEnforced, egressPolicyEnforced)
+	networkPolicy := getNetworkPolicy(ep, vis, ips, policy, ingressPolicyEnforced, egressPolicyEnforced, s.secretsNamespace)
+	log.WithField("np", networkPolicy).Debug("MAARTJE")
 
 	// First, validate the policy
 	err := networkPolicy.Validate()

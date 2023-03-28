@@ -140,11 +140,11 @@ type Proxy struct {
 func StartProxySupport(minPort uint16, maxPort uint16, stateDir string,
 	accessLogNotifier logger.LogRecordNotifier, accessLogMetadata []string,
 	datapathUpdater DatapathUpdater, mgr EndpointLookup,
-	ipcache IPCacheManager) *Proxy {
+	ipcache IPCacheManager, secretsNamespace string) *Proxy {
 	endpointManager = mgr
 	eir := newEndpointInfoRegistry(ipcache)
 	logger.SetEndpointInfoRegistry(eir)
-	xdsServer := envoy.StartXDSServer(ipcache, stateDir)
+	xdsServer := envoy.StartXDSServer(ipcache, stateDir, secretsNamespace)
 
 	if accessLogNotifier != nil {
 		logger.SetNotifier(accessLogNotifier)

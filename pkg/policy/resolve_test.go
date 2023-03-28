@@ -193,7 +193,7 @@ func bootstrapRepo(ruleGenFunc func(int) api.Rules, numRules int, c *C) *Reposit
 	mgr := cache.NewCachingIdentityAllocator(&testidentity.IdentityAllocatorOwnerMock{})
 	ids := mgr.GetIdentityCache()
 	fakeAllocator := testidentity.NewMockIdentityAllocator(ids)
-	testRepo := NewPolicyRepository(fakeAllocator, ids)
+	testRepo := NewPolicyRepository(fakeAllocator, ids, "")
 
 	SetPolicyEnabled(option.DefaultEnforcement)
 	GenerateNumIdentities(3000)

@@ -57,6 +57,8 @@ type policyContext struct {
 	// isDeny this field is set to true if the given policy computation should
 	// be done for the policy deny.
 	isDeny bool
+
+	secretsNS string
 }
 
 // GetNamespace() returns the namespace for the policy rule being resolved
@@ -70,7 +72,7 @@ func (p *policyContext) GetSelectorCache() *SelectorCache {
 }
 
 func (p *policyContext) GetEnvoyHTTPRules(l7Rules *api.L7Rules) (*cilium.HttpNetworkPolicyRules, bool) {
-	return p.repo.GetEnvoyHTTPRules(l7Rules, p.ns)
+	return p.repo.GetEnvoyHTTPRules(l7Rules, p.ns, p.secretsNS)
 }
 
 // IsDeny returns true if the policy computation should be done for the
@@ -117,7 +119,9 @@ type Repository struct {
 	// PolicyCache tracks the selector policies created from this repo
 	policyCache *PolicyCache
 
-	getEnvoyHTTPRules func(*api.L7Rules, string) (*cilium.HttpNetworkPolicyRules, bool)
+	getEnvoyHTTPRules func(*api.L7Rules, string, string) (*cilium.HttpNetworkPolicyRules, bool)
+
+	secretsNamespace string
 }
 
 // GetSelectorCache() returns the selector cache used by the Repository
@@ -125,15 +129,15 @@ func (p *Repository) GetSelectorCache() *SelectorCache {
 	return p.selectorCache
 }
 
-func (p *Repository) SetEnvoyRulesFunc(f func(*api.L7Rules, string) (*cilium.HttpNetworkPolicyRules, bool)) {
+func (p *Repository) SetEnvoyRulesFunc(f func(*api.L7Rules, string, string) (*cilium.HttpNetworkPolicyRules, bool)) {
 	p.getEnvoyHTTPRules = f
 }
 
-func (p *Repository) GetEnvoyHTTPRules(l7Rules *api.L7Rules, ns string) (*cilium.HttpNetworkPolicyRules, bool) {
+func (p *Repository) GetEnvoyHTTPRules(l7Rules *api.L7Rules, ns, secretsNS string) (*cilium.HttpNetworkPolicyRules, bool) {
 	if p.getEnvoyHTTPRules == nil {
 		return nil, true
 	}
-	return p.getEnvoyHTTPRules(l7Rules, ns)
+	return p.getEnvoyHTTPRules(l7Rules, ns, secretsNS)
 }
 
 // GetPolicyCache() returns the policy cache used by the Repository
@@ -145,6 +149,7 @@ func (p *Repository) GetPolicyCache() *PolicyCache {
 func NewPolicyRepository(
 	idAllocator cache.IdentityAllocator,
 	idCache cache.IdentityCache,
+	secretsNamespace string,
 ) *Repository {
 	repo := NewStoppedPolicyRepository(idAllocator, idCache)
 	repo.Start()
@@ -231,8 +236,9 @@ func (p *Repository) Start() {
 // Note: Only used for policy tracing
 func (p *Repository) ResolveL4IngressPolicy(ctx *SearchContext) (L4PolicyMap, error) {
 	policyCtx := policyContext{
-		repo: p,
-		ns:   ctx.To.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		repo:      p,
+		ns:        ctx.To.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		secretsNS: p.secretsNamespace,
 	}
 	result, err := p.rules.resolveL4IngressPolicy(&policyCtx, ctx)
 	if err != nil {
@@ -254,8 +260,9 @@ func (p *Repository) ResolveL4IngressPolicy(ctx *SearchContext) (L4PolicyMap, er
 // NOTE: This is only called from unit tests, but from multiple packages.
 func (p *Repository) ResolveL4EgressPolicy(ctx *SearchContext) (L4PolicyMap, error) {
 	policyCtx := policyContext{
-		repo: p,
-		ns:   ctx.From.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		repo:      p,
+		ns:        ctx.From.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		secretsNS: p.secretsNamespace,
 	}
 	result, err := p.rules.resolveL4EgressPolicy(&policyCtx, ctx)
 
@@ -699,8 +706,9 @@ func (p *Repository) resolvePolicyLocked(securityIdentity *identity.Identity) (*
 	}
 
 	policyCtx := policyContext{
-		repo: p,
-		ns:   lbls.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		repo:      p,
+		ns:        lbls.Get(labels.LabelSourceK8sKeyPrefix + k8sConst.PodNamespaceLabel),
+		secretsNS: p.secretsNamespace,
 	}
 
 	if ingressEnabled {

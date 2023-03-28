@@ -613,7 +613,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	// FIXME: Make the port range configurable.
 	if option.Config.EnableL7Proxy {
 		d.l7Proxy = proxy.StartProxySupport(10000, 20000, option.Config.RunDir,
-			&d, option.Config.AgentLabels, d.datapath, d.endpointManager, d.ipcache)
+			&d, option.Config.AgentLabels, d.datapath, d.endpointManager, d.ipcache, option.Config.PolicySecretsNamespace)
 	} else {
 		log.Info("L7 proxies are disabled")
 		if option.Config.EnableEnvoyConfig {
