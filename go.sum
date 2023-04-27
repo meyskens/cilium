@@ -184,6 +184,8 @@ github.com/cilium/proxy v0.0.0-20230420184820-797bea843de1 h1:vQBT/pz9CxfPUHLiCN
 github.com/cilium/proxy v0.0.0-20230420184820-797bea843de1/go.mod h1:ontBl/RX7G0GwcR38YQVp6d75MjIsL1FbBidVpn+F8I=
 github.com/cilium/proxy v0.0.0-20230314111813-c596a21ee37b h1:D+rxavDoM7mILZ3Y4O5LssbZr8kageHSNBQQsO7BK64=
 github.com/cilium/proxy v0.0.0-20230314111813-c596a21ee37b/go.mod h1:ontBl/RX7G0GwcR38YQVp6d75MjIsL1FbBidVpn+F8I=
+github.com/cilium/proxy v0.0.0-20230427124500-3d6c80b860b9 h1:8ZNBTcGUfU0tof3m0pZl2t9yJinZjXuSoJlalIyuykI=
+github.com/cilium/proxy v0.0.0-20230427124500-3d6c80b860b9/go.mod h1:ontBl/RX7G0GwcR38YQVp6d75MjIsL1FbBidVpn+F8I=
 github.com/cilium/workerpool v1.2.0 h1:Wc2iOPTvCgWKQXeq4L5tnx4QFEI+z5q1+bSpSS0cnAY=
 github.com/cilium/workerpool v1.2.0/go.mod h1:GOYJhwlnIjR+jWSDNBb5kw47G1H/XA9X4WOBpgr4pQU=
 github.com/circonus-labs/circonus-gometrics v2.3.1+incompatible/go.mod h1:nmEj6Dob7S7YxXgwXpfOuvO54S+tGdZdw9fuRZt25Ag=
