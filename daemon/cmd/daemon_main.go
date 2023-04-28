@@ -1197,10 +1197,10 @@ func initEnv() {
 			log.Fatal("Truncated Envoy version string, cannot verify version match.")
 		}
 		// Make sure Envoy version matches ours
-		if !strings.HasPrefix(envoyVersionArray[2], envoy.RequiredEnvoyVersionSHA) {
-			log.Fatalf("Envoy version %s does not match with required version %s ,aborting.",
-				envoyVersionArray[2], envoy.RequiredEnvoyVersionSHA)
-		}
+		// if !strings.HasPrefix(envoyVersionArray[2], envoy.RequiredEnvoyVersionSHA) {
+		// 	log.Fatalf("Envoy version %s does not match with required version %s ,aborting.",
+		// 		envoyVersionArray[2], envoy.RequiredEnvoyVersionSHA)
+		// }
 	}
 
 	if option.Config.PreAllocateMaps {
@@ -1590,7 +1590,6 @@ type daemonParams struct {
 	CacheStatus          k8s.CacheStatus
 	NodeManager          nodeManager.NodeManager
 	EndpointManager      endpointmanager.EndpointManager
-	SecretManager        certificatemanager.SecretManager
 	AuthManager          auth.Manager
 	IdentityAllocator    CachingIdentityAllocator
 	Policy               *policy.Repository

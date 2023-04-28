@@ -1,8 +1,6 @@
 debug:
   enabled: true
-  verbose:
-    - flow
-    - envoy
+  verbose: "flow,envoy"
 image:
   override: "localhost:5000/cilium/cilium-dev:local"
   pullPolicy: Never
