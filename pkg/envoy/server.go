@@ -1401,7 +1401,7 @@ func getPortNetworkPolicyRule(sel policy.CachedSelector, wildcard bool, l7Parser
 
 	if l7Rules.TerminatingTLS != nil && l7Rules.TerminatingTLS.Secret != nil {
 		r.DownstreamTlsContext = &cilium.TLSContext{
-			ValidationContextSdsSecret: fmt.Sprintf("%s/%s-%s", secretsNamespace, l7Rules.TerminatingTLS.Secret.Namespace, l7Rules.TerminatingTLS.Secret.Name),
+			TlsSdsSecret: fmt.Sprintf("%s/%s-%s", secretsNamespace, l7Rules.TerminatingTLS.Secret.Namespace, l7Rules.TerminatingTLS.Secret.Name),
 		}
 	} else if l7Rules.TerminatingTLS != nil {
 		// MAARTJE: are these content or file name paths... IDK

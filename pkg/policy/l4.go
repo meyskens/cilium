@@ -682,11 +682,14 @@ func createL4Filter(policyCtx PolicyContext, peerEndpoints api.EndpointSelectorS
 	}
 
 	var rules *api.L7Rules
+	var terminatingTLS, originatingTLS *api.TLSContext
 	var sni []string
 	forceRedirect := false
 	pr := rule.GetPortRule()
 	if pr != nil {
 		rules = pr.Rules
+		terminatingTLS = pr.TerminatingTLS
+		originatingTLS = pr.OriginatingTLS
 		sni = pr.ServerNames
 
 		// Set parser type to TLS, if TLS. This will be overridden by L7 below, if rules
@@ -740,7 +743,7 @@ func createL4Filter(policyCtx PolicyContext, peerEndpoints api.EndpointSelectorS
 	}
 
 	if l4.L7Parser != ParserTypeNone || auth != nil || policyCtx.IsDeny() {
-		l4.PerSelectorPolicies.addPolicyForSelector(rules, pr.TerminatingTLS, pr.OriginatingTLS, auth, policyCtx.IsDeny(), sni, forceRedirect)
+		l4.PerSelectorPolicies.addPolicyForSelector(rules, terminatingTLS, originatingTLS, auth, policyCtx.IsDeny(), sni, forceRedirect)
 	}
 
 	for cs := range l4.PerSelectorPolicies {

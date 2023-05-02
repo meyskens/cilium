@@ -778,11 +778,14 @@ func (ds *PolicyTestSuite) TestMergeTLSTCPPolicy(c *C) {
 			cachedSelectorA: nil, // no proxy redirect
 			cachedSelectorC: &PerSelectorPolicy{
 				TerminatingTLS: &api.TLSContext{
-					Certificate: "fake.crt",
-					PrivateKey:  "fake.key",
+					Secret: &api.Secret{
+						Name: "tls-cert",
+					},
 				},
 				OriginatingTLS: &api.TLSContext{
-					TrustedCA: "fake.crt",
+					Secret: &api.Secret{
+						Name: "tls-ca-certs",
+					},
 				},
 				EnvoyHTTPRules:  nil,
 				CanShortCircuit: false,
@@ -871,11 +874,14 @@ func (ds *PolicyTestSuite) TestMergeTLSHTTPPolicy(c *C) {
 			cachedSelectorA: nil, // no proxy redirect
 			cachedSelectorC: &PerSelectorPolicy{
 				TerminatingTLS: &api.TLSContext{
-					Certificate: "fake.crt",
-					PrivateKey:  "fake.key",
+					Secret: &api.Secret{
+						Name: "tls-cert",
+					},
 				},
 				OriginatingTLS: &api.TLSContext{
-					TrustedCA: "fake.crt",
+					Secret: &api.Secret{
+						Name: "tls-ca-certs",
+					},
 				},
 				EnvoyHTTPRules:  nil,
 				CanShortCircuit: false,
@@ -982,11 +988,14 @@ func (ds *PolicyTestSuite) TestMergeTLSSNIPolicy(c *C) {
 			cachedSelectorA: nil, // no proxy redirect
 			cachedSelectorC: &PerSelectorPolicy{
 				TerminatingTLS: &api.TLSContext{
-					Certificate: "fake.crt",
-					PrivateKey:  "fake.key",
+					Secret: &api.Secret{
+						Name: "tls-cert",
+					},
 				},
 				OriginatingTLS: &api.TLSContext{
-					TrustedCA: "fake.crt",
+					Secret: &api.Secret{
+						Name: "tls-ca-certs",
+					},
 				},
 				ServerNames:     StringSet{"www.foo.com": {}, "www.bar.com": {}},
 				EnvoyHTTPRules:  nil,
