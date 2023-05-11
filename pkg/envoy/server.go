@@ -1404,7 +1404,6 @@ func getPortNetworkPolicyRule(sel policy.CachedSelector, wildcard bool, l7Parser
 			TlsSdsSecret: fmt.Sprintf("%s/%s-%s", secretsNamespace, l7Rules.TerminatingTLS.Secret.Namespace, l7Rules.TerminatingTLS.Secret.Name),
 		}
 	} else if l7Rules.TerminatingTLS != nil {
-		// MAARTJE: are these content or file name paths... IDK
 		r.DownstreamTlsContext = &cilium.TLSContext{
 			CertificateChain: l7Rules.TerminatingTLS.Certificate,
 			PrivateKey:       l7Rules.TerminatingTLS.PrivateKey,
@@ -1762,7 +1761,6 @@ func (s *XDSServer) UpdateNetworkPolicy(ep logger.EndpointUpdater, vis *policy.V
 	}
 
 	networkPolicy := getNetworkPolicy(ep, vis, ips, policy, ingressPolicyEnforced, egressPolicyEnforced, s.secretsNamespace)
-	log.WithField("np", networkPolicy).Debug("MAARTJE")
 
 	// First, validate the policy
 	err := networkPolicy.Validate()
