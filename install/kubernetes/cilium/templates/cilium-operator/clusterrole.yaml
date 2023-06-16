@@ -258,6 +258,7 @@ rules:
   - gateways
   - tlsroutes
   - httproutes
+  - grpcroutes
   - referencegrants
   - referencepolicies
   verbs:
