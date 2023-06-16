@@ -108,6 +108,15 @@ func NewController(enableSecretSync bool, secretsNamespace string, idleTimeoutSe
 		return nil, err
 	}
 
+	grpcReconciler := &grpcRouteReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Model:  m,
+	}
+	if err = grpcReconciler.SetupWithManager(mgr); err != nil {
+		return nil, err
+	}
+
 	rgReconciler := &referenceGrantReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
