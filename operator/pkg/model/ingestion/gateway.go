@@ -261,7 +261,7 @@ func computeEnvoyRoutesFromGRPCRoutes(input Input, l gatewayv1beta1.Listener) []
 		for _, rule := range r.Spec.Rules {
 			bes := make([]model.Backend, 0, len(rule.BackendRefs))
 			for _, be := range rule.BackendRefs {
-				if !helpers.IsBackendReferenceAllowed(r.GetNamespace(), be.BackendRef, gatewayv1beta1.SchemeGroupVersion.WithKind("HTTPRoute"), input.ReferenceGrants) {
+				if !helpers.IsBackendReferenceAllowed(r.GetNamespace(), be.BackendRef, gatewayv1beta1.SchemeGroupVersion.WithKind("GRPCRoute"), input.ReferenceGrants) {
 					continue
 				}
 				if (be.Kind != nil && *be.Kind != "Service") || (be.Group != nil && *be.Group != corev1.GroupName) {
@@ -480,16 +480,18 @@ func grpcRouteMatchToModelStringMatch(match gatewayv1alpha2.GRPCRouteMatch) mode
 		return model.StringMatch{}
 	}
 
-	matchType := *match.Method.Type
-
 	// make these pointers safe to use
 	service := ""
 	method := ""
+	matchType := gatewayv1alpha2.GRPCMethodMatchExact
 	if match.Method.Service != nil {
 		service = *match.Method.Service
 	}
 	if match.Method.Method != nil {
 		method = *match.Method.Method
+	}
+	if match.Method.Type != nil {
+		matchType = *match.Method.Type
 	}
 
 	// convert service and methods to path matching logic
