@@ -6,6 +6,7 @@ package ingestion
 import (
 	"testing"
 
+	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1439,6 +1440,130 @@ func TestTLSGatewayAPI(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			_, listeners := GatewayAPI(tc.input)
+			assert.Equal(t, tc.want, listeners, "Listeners did not match")
+		})
+	}
+}
+
+var basicGRPC = Input{
+	GatewayClass: gatewayv1beta1.GatewayClass{},
+	Gateway: gatewayv1beta1.Gateway{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Gateway",
+			APIVersion: "gateway.networking.k8s.io/v1beta1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "my-gateway",
+			Namespace: "default",
+		},
+		Spec: gatewayv1beta1.GatewaySpec{
+			Listeners: []gatewayv1beta1.Listener{
+				{
+					Name:     "prod-web-gw",
+					Port:     80,
+					Protocol: "HTTP",
+				},
+			},
+		},
+	},
+	GRPCRoutes: []gatewayv1alpha2.GRPCRoute{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "grpc-app-1",
+				Namespace: "default",
+			},
+			Spec: gatewayv1alpha2.GRPCRouteSpec{
+				CommonRouteSpec: gatewayv1beta1.CommonRouteSpec{
+					ParentRefs: []gatewayv1beta1.ParentReference{
+						{
+							Name: "my-gateway",
+						},
+					},
+				},
+				Rules: []gatewayv1alpha2.GRPCRouteRule{
+					{
+						BackendRefs: []gatewayv1alpha2.GRPCBackendRef{
+							{
+								BackendRef: gatewayv1alpha2.BackendRef{
+									BackendObjectReference: gatewayv1alpha2.BackendObjectReference{
+										Name: "my-service",
+										Port: model.AddressOf[gatewayv1beta1.PortNumber](443),
+									},
+								},
+							},
+						},
+
+						Matches: []gatewayv1alpha2.GRPCRouteMatch{
+							{
+								Method: &gatewayv1alpha2.GRPCMethodMatch{
+									Service: to.StringPtr("MyService"),
+									Method:  to.StringPtr("GetObject"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+	Services: []corev1.Service{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "my-service",
+				Namespace: "default",
+			},
+		},
+	},
+}
+
+var basicGRPCListeners = []model.HTTPListener{
+	{
+		Name: "prod-web-gw",
+		Sources: []model.FullyQualifiedResource{
+			{
+				Name:      "my-gateway",
+				Namespace: "default",
+				Group:     "gateway.networking.k8s.io",
+				Version:   "v1beta1",
+				Kind:      "Gateway",
+			},
+		},
+		Address:  "",
+		Port:     80,
+		Hostname: "*",
+		Routes: []model.HTTPRoute{
+			{
+				PathMatch: model.StringMatch{
+					Exact: "MyService/GetObject",
+				},
+				Backends: []model.Backend{
+					{
+						Name:      "my-service",
+						Namespace: "default",
+						Port: &model.BackendPort{
+							Port: 443,
+						},
+					},
+				},
+			},
+		},
+	},
+}
+
+func TestGRPCGatewayAPI(t *testing.T) {
+	tests := map[string]struct {
+		input Input
+		want  []model.HTTPListener
+	}{
+		"basic grpc": {
+			input: basicGRPC,
+			want:  basicGRPCListeners,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			listeners, _ := GatewayAPI(tc.input)
 			assert.Equal(t, tc.want, listeners, "Listeners did not match")
 		})
 	}

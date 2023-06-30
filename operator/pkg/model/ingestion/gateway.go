@@ -34,46 +34,44 @@ func GatewayAPI(input Input) ([]model.HTTPListener, []model.TLSListener) {
 	var resTLS []model.TLSListener
 
 	for _, l := range input.Gateway.Spec.Listeners {
-		if l.Protocol != gatewayv1beta1.HTTPProtocolType &&
-			l.Protocol != gatewayv1beta1.HTTPSProtocolType &&
-			l.Protocol != gatewayv1beta1.TLSProtocolType {
-			continue
+		if l.Protocol == gatewayv1beta1.HTTPProtocolType ||
+			l.Protocol == gatewayv1beta1.HTTPSProtocolType {
+			resHTTP = append(resHTTP, model.HTTPListener{
+				Name: string(l.Name),
+				Sources: []model.FullyQualifiedResource{
+					{
+						Name:      input.Gateway.GetName(),
+						Namespace: input.Gateway.GetNamespace(),
+						Group:     input.Gateway.GroupVersionKind().Group,
+						Version:   input.Gateway.GroupVersionKind().Version,
+						Kind:      input.Gateway.GroupVersionKind().Kind,
+						UID:       string(input.Gateway.GetUID()),
+					},
+				},
+				Port:     uint32(l.Port),
+				Hostname: toHostname(l.Hostname),
+				TLS:      toTLS(l.TLS, input.ReferenceGrants, input.Gateway.GetNamespace()),
+				Routes:   append(computeEnvoyRoutesFromHTTPRoutes(input, l), computeEnvoyRoutesFromGRPCRoutes(input, l)...),
+			})
+		} else if l.Protocol == gatewayv1beta1.TLSProtocolType {
+			resTLS = append(resTLS, model.TLSListener{
+				Name: string(l.Name),
+				Sources: []model.FullyQualifiedResource{
+					{
+						Name:      input.Gateway.GetName(),
+						Namespace: input.Gateway.GetNamespace(),
+						Group:     input.Gateway.GroupVersionKind().Group,
+						Version:   input.Gateway.GroupVersionKind().Version,
+						Kind:      input.Gateway.GroupVersionKind().Kind,
+						UID:       string(input.Gateway.GetUID()),
+					},
+				},
+				Port:     uint32(l.Port),
+				Hostname: toHostname(l.Hostname),
+				Routes:   computeEnvoyRoutesFromTLSRoutes(input, l),
+			})
 		}
 
-		resHTTP = append(resHTTP, model.HTTPListener{
-			Name: string(l.Name),
-			Sources: []model.FullyQualifiedResource{
-				{
-					Name:      input.Gateway.GetName(),
-					Namespace: input.Gateway.GetNamespace(),
-					Group:     input.Gateway.GroupVersionKind().Group,
-					Version:   input.Gateway.GroupVersionKind().Version,
-					Kind:      input.Gateway.GroupVersionKind().Kind,
-					UID:       string(input.Gateway.GetUID()),
-				},
-			},
-			Port:     uint32(l.Port),
-			Hostname: toHostname(l.Hostname),
-			TLS:      toTLS(l.TLS, input.ReferenceGrants, input.Gateway.GetNamespace()),
-			Routes:   append(computeEnvoyRoutesFromHTTPRoutes(input, l), computeEnvoyRoutesFromGRPCRoutes(input, l)...),
-		})
-
-		resTLS = append(resTLS, model.TLSListener{
-			Name: string(l.Name),
-			Sources: []model.FullyQualifiedResource{
-				{
-					Name:      input.Gateway.GetName(),
-					Namespace: input.Gateway.GetNamespace(),
-					Group:     input.Gateway.GroupVersionKind().Group,
-					Version:   input.Gateway.GroupVersionKind().Version,
-					Kind:      input.Gateway.GroupVersionKind().Kind,
-					UID:       string(input.Gateway.GetUID()),
-				},
-			},
-			Port:     uint32(l.Port),
-			Hostname: toHostname(l.Hostname),
-			Routes:   computeEnvoyRoutesFromTLSRoutes(input, l),
-		})
 	}
 
 	return resHTTP, resTLS
