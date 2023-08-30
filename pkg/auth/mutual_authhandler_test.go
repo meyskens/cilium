@@ -326,14 +326,23 @@ func Test_mutualAuthHandler_GetCertificateForIncomingConnection(t *testing.T) {
 
 func Test_mutualAuthHandler_authenticate(t *testing.T) {
 	certMap, keyMap, caPool := generateTestCertificates(t)
+	badCertMap, badKeyMap, badCAPool := generateTestCertificates(t)
+
+	port := getRandomOpenPort(t)
 
 	mAuthHandler := &mutualAuthHandler{
-		cfg:  MutualAuthConfig{MutualAuthListenerPort: getRandomOpenPort(t)},
+		cfg:  MutualAuthConfig{MutualAuthListenerPort: port},
 		log:  logrus.New(),
 		cert: &fakeCertificateProvider{certMap: certMap, caPool: caPool, privkeyMap: keyMap},
 	}
 	mAuthHandler.onStart(context.Background())
 	defer mAuthHandler.onStop(context.Background())
+
+	badMAuthHandler := &mutualAuthHandler{
+		cfg:  MutualAuthConfig{MutualAuthListenerPort: port},
+		log:  logrus.New(),
+		cert: &fakeCertificateProvider{certMap: badCertMap, caPool: badCAPool, privkeyMap: badKeyMap},
+	}
 
 	var lowestExpirationTime time.Time
 	for _, cert := range certMap {
@@ -350,6 +359,7 @@ func Test_mutualAuthHandler_authenticate(t *testing.T) {
 		args    args
 		want    *authResponse
 		wantErr bool
+		handler *mutualAuthHandler
 	}{
 		{
 			name: "authenticate two valid identities",
@@ -363,6 +373,7 @@ func Test_mutualAuthHandler_authenticate(t *testing.T) {
 			want: &authResponse{
 				expirationTime: lowestExpirationTime,
 			},
+			handler: mAuthHandler,
 		},
 		{
 			name: "error on authenticate when remote identity is not valid",
@@ -374,6 +385,7 @@ func Test_mutualAuthHandler_authenticate(t *testing.T) {
 				},
 			},
 			wantErr: true,
+			handler: mAuthHandler,
 		},
 		{
 			name: "error on  authenticate when local identity is not valid",
@@ -385,6 +397,7 @@ func Test_mutualAuthHandler_authenticate(t *testing.T) {
 				},
 			},
 			wantErr: true,
+			handler: mAuthHandler,
 		},
 		{
 			name: "error on authenticate when auth request is bad",
@@ -395,11 +408,23 @@ func Test_mutualAuthHandler_authenticate(t *testing.T) {
 				},
 			},
 			wantErr: true,
+			handler: mAuthHandler,
+		},
+		{
+			name: "error on authenticate when auth is sent from different CA",
+			args: args{
+				ar: &authRequest{
+					localIdentity:  id1000,
+					remoteIdentity: id1001,
+				},
+			},
+			wantErr: true,
+			handler: badMAuthHandler,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := mAuthHandler.authenticate(tt.args.ar)
+			got, err := tt.handler.authenticate(tt.args.ar)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("mutualAuthHandler.authenticate() error = %v, wantErr %v", err, tt.wantErr)
 				return
