@@ -86,18 +86,23 @@ func (f *fakeCertificateProvider) ValidateIdentity(id identity.NumericIdentity, 
 	return false, nil
 }
 
-func (f *fakeCertificateProvider) NumericIdentityToSNI(id identity.NumericIdentity) string {
+func (f *fakeCertificateProvider) NumericIdentityToSNI(id identity.NumericIdentity, extraData string) string {
 	return id.String() + "." + "spiffe.cilium"
 }
 
-func (f *fakeCertificateProvider) SNIToNumericIdentity(sni string) (identity.NumericIdentity, error) {
+func (f *fakeCertificateProvider) SNIToNumericIdentity(sni string) (identity.NumericIdentity, string, error) {
 	suffix := "." + "spiffe.cilium"
 	if !strings.HasSuffix(sni, suffix) {
-		return 0, fmt.Errorf("SNI %s does not belong to our trust domain", sni)
+		return 0, "", fmt.Errorf("SNI %s does not belong to our trust domain", sni)
 	}
 
 	idStr := strings.TrimSuffix(sni, suffix)
-	return identity.ParseNumericIdentity(idStr)
+	id, err := identity.ParseNumericIdentity(idStr)
+	return id, "", err
+}
+
+func (f *fakeCertificateProvider) GetIdentityFromCertificate(cert *x509.Certificate) (identity.NumericIdentity, error) {
+	return 0, nil
 }
 
 func (f *fakeCertificateProvider) SubscribeToRotatedIdentities() <-chan certs.CertificateRotationEvent {

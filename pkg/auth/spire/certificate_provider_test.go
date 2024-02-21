@@ -28,7 +28,8 @@ var log = logging.DefaultLogger.WithField(logfields.LogSubsys, "spire") // just 
 
 func TestSpireDelegateClient_NumericIdentityToSNI(t *testing.T) {
 	type args struct {
-		id identity.NumericIdentity
+		id        identity.NumericIdentity
+		extraData string
 	}
 	tests := []struct {
 		name string
@@ -42,6 +43,14 @@ func TestSpireDelegateClient_NumericIdentityToSNI(t *testing.T) {
 			},
 			want: "1234.test.cilium.io",
 		},
+		{
+			name: "convert valid numeric identity with hash",
+			args: args{
+				id:        1234,
+				extraData: "abc123",
+			},
+			want: "abc123.1234.test.cilium.io",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -51,7 +60,7 @@ func TestSpireDelegateClient_NumericIdentityToSNI(t *testing.T) {
 				},
 				log: log,
 			}
-			if got := s.NumericIdentityToSNI(tt.args.id); got != tt.want {
+			if got := s.NumericIdentityToSNI(tt.args.id, tt.args.extraData); got != tt.want {
 				t.Errorf("SpireDelegateClient.NumericIdentityToSNI() = %v, want %v", got, tt.want)
 			}
 		})
@@ -63,10 +72,11 @@ func TestSpireDelegateClient_SNIToNumericIdentity(t *testing.T) {
 		sni string
 	}
 	tests := []struct {
-		name    string
-		args    args
-		want    identity.NumericIdentity
-		wantErr bool
+		name          string
+		args          args
+		want          identity.NumericIdentity
+		wantExtraData string
+		wantErr       bool
 	}{
 		{
 			name: "convert valid SNI",
@@ -75,6 +85,15 @@ func TestSpireDelegateClient_SNIToNumericIdentity(t *testing.T) {
 			},
 			want:    1234,
 			wantErr: false,
+		},
+		{
+			name: "convert valid SNI with a hash",
+			args: args{
+				sni: "abc123.1234.test.cilium.io",
+			},
+			want:          1234,
+			wantExtraData: "abc123",
+			wantErr:       false,
 		},
 		{
 			name: "error on convert invalid SNI under trust domain",
@@ -101,13 +120,16 @@ func TestSpireDelegateClient_SNIToNumericIdentity(t *testing.T) {
 				},
 				log: log,
 			}
-			got, err := s.SNIToNumericIdentity(tt.args.sni)
+			gotID, gotExtraData, err := s.SNIToNumericIdentity(tt.args.sni)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SpireDelegateClient.SNIToNumericIdentity() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("SpireDelegateClient.SNIToNumericIdentity() = %v, want %v", got, tt.want)
+			if !reflect.DeepEqual(gotID, tt.want) {
+				t.Errorf("SpireDelegateClient.SNIToNumericIdentity() = %v, want %v", gotID, tt.want)
+			}
+			if !reflect.DeepEqual(gotExtraData, tt.wantExtraData) {
+				t.Errorf("SpireDelegateClient.SNIToNumericIdentity() = %v, want %v", gotExtraData, tt.wantExtraData)
 			}
 		})
 	}

@@ -90,18 +90,34 @@ func (s *SpireDelegateClient) ValidateIdentity(id identity.NumericIdentity, cert
 	return cert.URIs[0].String() == spiffeID, nil
 }
 
-func (s *SpireDelegateClient) NumericIdentityToSNI(id identity.NumericIdentity) string {
-	return id.String() + "." + s.cfg.SpiffeTrustDomain
+func (s *SpireDelegateClient) NumericIdentityToSNI(id identity.NumericIdentity, extraData string) string {
+	if extraData != "" {
+		extraData += "."
+	}
+	return extraData + id.String() + "." + s.cfg.SpiffeTrustDomain
 }
 
-func (s *SpireDelegateClient) SNIToNumericIdentity(sni string) (identity.NumericIdentity, error) {
+func (s *SpireDelegateClient) SNIToNumericIdentity(sni string) (identity.NumericIdentity, string, error) {
 	suffix := "." + s.cfg.SpiffeTrustDomain
 	if !strings.HasSuffix(sni, suffix) {
-		return 0, fmt.Errorf("SNI %s does not belong to our trust domain", sni)
+		return 0, "", fmt.Errorf("SNI %s does not belong to our trust domain", sni)
 	}
 
-	idStr := strings.TrimSuffix(sni, suffix)
-	return identity.ParseNumericIdentity(idStr)
+	contentStr := strings.TrimSuffix(sni, suffix)
+	content := strings.Split(contentStr, ".")
+	var idStr, extraData string
+	if len(content) < 2 {
+		idStr = content[0]
+	} else {
+		extraData = content[0]
+		idStr = content[1]
+	}
+	id, err := identity.ParseNumericIdentity(idStr)
+	if err != nil {
+		return 0, "", fmt.Errorf("error parsing numeric identity: %w", err)
+	}
+
+	return id, extraData, nil
 }
 
 func (s *SpireDelegateClient) SubscribeToRotatedIdentities() <-chan certs.CertificateRotationEvent {
@@ -125,4 +141,12 @@ func (s *SpireDelegateClient) Status() *models.Status {
 	return &models.Status{
 		State: models.StatusStateOk,
 	}
+}
+
+func (s *SpireDelegateClient) GetIdentityFromCertificate(cert *x509.Certificate) (identity.NumericIdentity, error) {
+	if len(cert.URIs) != 1 {
+		return 0, errors.New("SPIFFE IDs must have exactly one URI SAN")
+	}
+
+	return s.spiffeIDToNumericIdentity(cert.URIs[0].String())
 }

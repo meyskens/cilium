@@ -25,16 +25,19 @@ type CertificateProvider interface {
 	// to send as trust chain for a certain identity as well as a private key
 	GetCertificateForIdentity(id identity.NumericIdentity) (*tls.Certificate, error)
 
+	// GetIdentityFromCertificate will return the Cilium Identity for a given certificate
+	GetIdentityFromCertificate(cert *x509.Certificate) (identity.NumericIdentity, error)
+
 	// ValidateIdentity will check if the SANs or other identity methods are valid
 	// for the given Cilium identity this function is needed as SPIFFE encodes the
 	// full ID in the URI SAN.
 	ValidateIdentity(id identity.NumericIdentity, cert *x509.Certificate) (bool, error)
 
-	// NumericIdentityToSNI will return the SNI that should be used for a given Cilium Identity
-	NumericIdentityToSNI(id identity.NumericIdentity) string
+	// NumericIdentityToSNI will return the SNI that should be used for a given Cilium Identity, extra data can encode extra information
+	NumericIdentityToSNI(id identity.NumericIdentity, extraData string) string
 
-	// SNIToNumericIdentity will return the Cilium Identity for a given SNI
-	SNIToNumericIdentity(sni string) (identity.NumericIdentity, error)
+	// SNIToNumericIdentity will return the Cilium Identity for a given SNI, as well as the encoded extra data
+	SNIToNumericIdentity(sni string) (identity.NumericIdentity, string, error)
 
 	// SubscribeToRotatedIdentities will return a channel with the identities that have rotated certificates
 	SubscribeToRotatedIdentities() <-chan CertificateRotationEvent

@@ -111,16 +111,23 @@ func (m *mutualAuthHandler) authenticate(ar *authRequest) (*authResponse, error)
 
 	var expirationTime *time.Time = &clientCert.Leaf.NotAfter
 
+	// this hash is used to make sure IP Chaches are in sync on both ends
+	ipCacheHash, err := m.getIPCacheHash([]identity.NumericIdentity{ar.localIdentity, ar.remoteIdentity})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get IP cache hash: %w", err)
+	}
+
 	// set up TLS socket
 
 	//nolint:gosec // InsecureSkipVerify is not insecure as we do the verification in VerifyPeerCertificate
 	tlsConn := tls.Client(conn, &tls.Config{
-		ServerName: m.cert.NumericIdentityToSNI(ar.remoteIdentity),
+		ServerName: m.cert.NumericIdentityToSNI(ar.remoteIdentity, ipCacheHash),
 		GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
 			return clientCert, nil
 		},
-		MinVersion:         tls.VersionTLS13,
-		InsecureSkipVerify: true, // not insecure as we do the verification in VerifyPeerCertificate
+		MinVersion:             tls.VersionTLS13,
+		SessionTicketsDisabled: true,
+		InsecureSkipVerify:     true, // not insecure as we do the verification in VerifyPeerCertificate
 		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 			// verifiedChains will be nil as we set InsecureSkipVerify to true
 
@@ -148,9 +155,24 @@ func (m *mutualAuthHandler) authenticate(ar *authRequest) (*authResponse, error)
 		return nil, fmt.Errorf("failed to perform TLS handshake: %w", err)
 	}
 
+	m.log.Debug("TLS handshake done, sending data to test connection")
+
+	if _, err := tlsConn.Write([]byte{'\x00'}); err != nil {
+		return nil, fmt.Errorf("failed to finish TLS handshake: %w", err)
+	}
+	var data = make([]byte, 1)
+	if _, err := tlsConn.Read(data); err != nil {
+		return nil, fmt.Errorf("failed to perform receive data over TLS: %w", err)
+	}
+	if data[0] != '\x00' {
+		return nil, errors.New("received data is empty, TLS handshake failed")
+	}
+
 	if expirationTime == nil {
 		return nil, fmt.Errorf("failed to get expiration time of peer certificate")
 	}
+
+	m.log.WithField("expirationTime", expirationTime).Debug("Mutual auth done")
 
 	return &authResponse{
 		expirationTime: *expirationTime,
@@ -203,22 +225,81 @@ func (m *mutualAuthHandler) handleConnection(ctx context.Context, conn net.Conn)
 		return
 	}
 
+	var localID, remoteID identity.NumericIdentity
+	var remoteHashData string
+
 	tlsConn := tls.Server(conn, &tls.Config{
-		ClientAuth:     tls.RequireAndVerifyClientCert,
-		GetCertificate: m.GetCertificateForIncomingConnection,
-		MinVersion:     tls.VersionTLS13,
-		ClientCAs:      caBundle,
+		ClientAuth:             tls.RequireAndVerifyClientCert,
+		SessionTicketsDisabled: true,
+		GetCertificate: func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			localID, remoteHashData, err = m.cert.SNIToNumericIdentity(chi.ServerName)
+			if err != nil || remoteHashData == "" {
+				return nil, fmt.Errorf("failed to get identity for SNI %s: %w", chi.ServerName, err)
+			}
+			return m.GetCertificateForIncomingConnection(chi)
+		},
+		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+			// get identity from the leaf certificate
+			for _, chain := range verifiedChains {
+				for _, cert := range chain {
+					if cert.IsCA {
+						continue
+					}
+					id, err := m.cert.GetIdentityFromCertificate(cert)
+					if err == nil {
+						remoteID = id
+					}
+				}
+			}
+
+			if remoteID == 0 || localID == 0 || remoteHashData == "" {
+				m.log.Warning("Failed to get remote or local identity or remoteHashData")
+				return errors.New("failed to get remote or local identity or remoteHashData")
+			}
+			ipCacheHash, err := m.getIPCacheHash([]identity.NumericIdentity{localID, remoteID})
+			m.log.WithField("ipCacheHash", ipCacheHash).WithField("idPairs", []identity.NumericIdentity{localID, remoteID}).Debug("Got IP cache hash")
+			if err != nil {
+				return fmt.Errorf("failed to get IP cache hash: %w", err)
+			}
+
+			if ipCacheHash != remoteHashData {
+				m.log.Warningf("IP cache mismatch happened! I have %q remote has %q", ipCacheHash, remoteHashData)
+				return fmt.Errorf("IP cache hash mismatch: %s != %s", ipCacheHash, remoteHashData)
+			} else {
+				m.log.Warningf("Hello Maartje, this is your friendly mutual auth. Wow oh my this works look i got %q and you gave me %q from the remote. Good girl!", ipCacheHash, remoteHashData)
+			}
+
+			return nil
+		},
+		MinVersion: tls.VersionTLS13,
+		ClientCAs:  caBundle,
 	})
 	defer tlsConn.Close()
 
 	if err := tlsConn.HandshakeContext(ctx); err != nil {
 		m.log.WithError(err).Error("failed to perform TLS handshake")
+		return
+	}
+
+	var data = make([]byte, 1)
+	if _, err := tlsConn.Read(data); err != nil {
+		m.log.WithError(err).Error("failed to perform receive data over TLS")
+		return
+	}
+	if data[0] != '\x00' {
+		m.log.Error("received data is empty, TLS handshake failed")
+		return
+	}
+
+	if _, err := tlsConn.Write([]byte{'\x00'}); err != nil {
+		m.log.WithError(err).Error("failed to perform send data over TLS")
+		return
 	}
 }
 
 func (m *mutualAuthHandler) GetCertificateForIncomingConnection(info *tls.ClientHelloInfo) (*tls.Certificate, error) {
 	m.log.WithField("SNI", info.ServerName).Debug("Got new TLS connection")
-	id, err := m.cert.SNIToNumericIdentity(info.ServerName)
+	id, _, err := m.cert.SNIToNumericIdentity(info.ServerName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get identity for SNI %s: %w", info.ServerName, err)
 	}
