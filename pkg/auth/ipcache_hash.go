@@ -52,7 +52,7 @@ func (m *mutualAuthHandler) getIPCacheHash(identities []identity.NumericIdentity
 
 	// serialize the map to a string
 	for id, ips := range mapToHash {
-		serializedData += fmt.Sprintf("%s:%s;", id, ips)
+		serializedData += fmt.Sprintf("%d:%s;", id, ips)
 	}
 
 	m.log.Debugf("Serialized data: %s", serializedData)
