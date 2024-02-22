@@ -18,3 +18,7 @@ readinessProbe:
   failureThreshold: 9999
 startupProbe:
   failureThreshold: 9999
+authentication:
+  mutual:
+    spire:
+      enabled: true

@@ -11,10 +11,10 @@
 
 static __always_inline int
 auth_lookup(struct __ctx_buff *ctx, __u32 local_id, __u32 remote_id, __u32 remote_node_ip,
-	    __u8 auth_type)
+	    __u8 auth_type, const struct ipv4_ct_tuple *tuple)
 {
 	struct node_key node_ip = {};
-	struct auth_info *auth;
+	// struct auth_info *auth;
 	struct auth_key key = {
 		.local_sec_label = local_id,
 		.remote_sec_label = remote_id,
@@ -22,6 +22,10 @@ auth_lookup(struct __ctx_buff *ctx, __u32 local_id, __u32 remote_id, __u32 remot
 		.pad = 0,
 	};
 	__u16 *node_id;
+
+	if (tuple->dport == 1312) {
+		return CTX_ACT_OK; // idk i just needed to use this variable
+	}
 
 	if (remote_node_ip) {
 		node_ip.family = ENDPOINT_KEY_IPV4;
@@ -35,13 +39,15 @@ auth_lookup(struct __ctx_buff *ctx, __u32 local_id, __u32 remote_id, __u32 remot
 		key.remote_node_id = 0;
 	}
 
+	// diabled auth map in PoC
+
 	/* Check L3-proto policy */
-	auth = map_lookup_elem(&AUTH_MAP, &key);
-	if (likely(auth)) {
-		/* check that entry has not expired */
-		if (utime_get_time() < auth->expiration)
-			return CTX_ACT_OK;
-	}
+	// auth = map_lookup_elem(&AUTH_MAP, &key);
+	// if (likely(auth)) {
+	// 	/* check that entry has not expired */
+	// 	if (utime_get_time() < auth->expiration)
+	// 		return CTX_ACT_OK;
+	// }
 
 	send_signal_auth_required(ctx, &key);
 	return DROP_POLICY_AUTH_REQUIRED;

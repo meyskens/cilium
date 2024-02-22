@@ -34,6 +34,9 @@ type AuthManager struct {
 	authmap               authMapCacher
 	authSignalBackoffTime time.Duration
 
+	// experimental contact map per connection authentication
+	ctMapAuthenticator *ctMapAuthenticator
+
 	mutex                    lock.Mutex
 	pending                  map[authKey]struct{}
 	handleAuthenticationFunc func(a *AuthManager, k authKey, reAuth bool)
@@ -77,6 +80,7 @@ func newAuthManager(logger logrus.FieldLogger, authHandlers []authHandler, authm
 		pending:                  make(map[authKey]struct{}),
 		handleAuthenticationFunc: handleAuthentication,
 		authSignalBackoffTime:    authSignalBackoffTime,
+		ctMapAuthenticator:       newCtMapAuthenticator(logger),
 	}, nil
 }
 
@@ -134,12 +138,12 @@ func (a *AuthManager) handleCertificateRotationEvent(_ context.Context, event ce
 }
 
 func handleAuthentication(a *AuthManager, k authKey, reAuth bool) {
-	if !a.markPendingAuth(k) {
-		a.logger.
-			WithField("key", k).
-			Debug("Pending authentication, skipping authentication")
-		return
-	}
+	// if !a.markPendingAuth(k) {
+	// 	a.logger.
+	// 		WithField("key", k).
+	// 		Debug("Pending authentication, skipping authentication")
+	// 	return
+	// }
 
 	go func(key authKey) {
 		defer a.clearPendingAuth(key)
@@ -218,13 +222,20 @@ func (a *AuthManager) authenticate(key authKey) error {
 		remoteNodeIP:   nodeIP,
 	}
 
-	authResp, err := h.authenticate(authReq)
+	_, err := h.authenticate(authReq)
 	if err != nil {
 		return fmt.Errorf("failed to authenticate with auth type %s: %w", key.authType, err)
 	}
 
-	if err = a.updateAuthMap(key, authResp.expirationTime); err != nil {
-		return fmt.Errorf("failed to update BPF map in datapath: %w", err)
+	//if err = a.updateAuthMap(key, authResp.expirationTime); err != nil {
+	//	return fmt.Errorf("failed to update BPF map in datapath: %w", err)
+	// }
+
+	// experimental contack map per connection authentication
+
+	err = a.ctMapAuthenticator.markAuthenticated(authReq)
+	if err != nil {
+		return fmt.Errorf("failed to mark authenticated: %w", err)
 	}
 
 	a.logger.

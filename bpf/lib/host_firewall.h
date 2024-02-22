@@ -81,7 +81,7 @@ __ipv6_host_policy_egress(struct __ctx_buff *ctx, bool is_host_id __maybe_unused
 {
 	struct ct_state ct_state_new = {};
 	struct ipv6_ct_tuple *tuple = &ct_buffer->tuple;
-	__u32 tunnel_endpoint = 0;
+	// __u32 tunnel_endpoint = 0;
 	int ret = ct_buffer->ret;
 	int verdict;
 	__u8 policy_match_type = POLICY_MATCH_NONE;
@@ -105,7 +105,7 @@ __ipv6_host_policy_egress(struct __ctx_buff *ctx, bool is_host_id __maybe_unused
 	info = lookup_ip6_remote_endpoint((union v6addr *)&ip6->daddr, 0);
 	if (info && info->sec_identity) {
 		dst_sec_identity = info->sec_identity;
-		tunnel_endpoint = info->tunnel_endpoint;
+		// tunnel_endpoint = info->tunnel_endpoint;
 	}
 	cilium_dbg(ctx, info ? DBG_IP_ID_MAP_SUCCEED6 : DBG_IP_ID_MAP_FAILED6,
 		   ip6->daddr.s6_addr32[3], dst_sec_identity);
@@ -120,7 +120,7 @@ __ipv6_host_policy_egress(struct __ctx_buff *ctx, bool is_host_id __maybe_unused
 				     &audited, ext_err, &proxy_port);
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
 		auth_type = (__u8)*ext_err;
-		verdict = auth_lookup(ctx, HOST_ID, dst_sec_identity, tunnel_endpoint, auth_type);
+		// verdict = auth_lookup(ctx, HOST_ID, dst_sec_identity, tunnel_endpoint, auth_type);
 	}
 
 	/* Only create CT entry for accepted connections */
@@ -209,7 +209,7 @@ __ipv6_host_policy_ingress(struct __ctx_buff *ctx, struct ipv6hdr *ip6,
 {
 	struct ct_state ct_state_new = {};
 	struct ipv6_ct_tuple *tuple = &ct_buffer->tuple;
-	__u32 tunnel_endpoint = 0;
+	// __u32 tunnel_endpoint = 0;
 	int ret = ct_buffer->ret;
 	int verdict = CTX_ACT_OK;
 	__u8 policy_match_type = POLICY_MATCH_NONE;
@@ -225,7 +225,7 @@ __ipv6_host_policy_ingress(struct __ctx_buff *ctx, struct ipv6hdr *ip6,
 	info = lookup_ip6_remote_endpoint((union v6addr *)&ip6->saddr, 0);
 	if (info && info->sec_identity) {
 		*src_sec_identity = info->sec_identity;
-		tunnel_endpoint = info->tunnel_endpoint;
+		// tunnel_endpoint = info->tunnel_endpoint;
 	}
 	cilium_dbg(ctx, info ? DBG_IP_ID_MAP_SUCCEED6 : DBG_IP_ID_MAP_FAILED6,
 		   ip6->saddr.s6_addr32[3], *src_sec_identity);
@@ -239,7 +239,7 @@ __ipv6_host_policy_ingress(struct __ctx_buff *ctx, struct ipv6hdr *ip6,
 				      &policy_match_type, &audited, ext_err, &proxy_port);
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
 		auth_type = (__u8)*ext_err;
-		verdict = auth_lookup(ctx, HOST_ID, *src_sec_identity, tunnel_endpoint, auth_type);
+		// verdict = auth_lookup(ctx, HOST_ID, *src_sec_identity, tunnel_endpoint, auth_type);
 	}
 
 	/* Only create CT entry for accepted connections */
@@ -395,7 +395,7 @@ __ipv4_host_policy_egress(struct __ctx_buff *ctx, bool is_host_id __maybe_unused
 				     &audited, ext_err, &proxy_port);
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
 		auth_type = (__u8)*ext_err;
-		verdict = auth_lookup(ctx, HOST_ID, dst_sec_identity, tunnel_endpoint, auth_type);
+		verdict = auth_lookup(ctx, HOST_ID, dst_sec_identity, tunnel_endpoint, auth_type, tuple);
 	}
 
 	/* Only create CT entry for accepted connections */
@@ -517,7 +517,7 @@ __ipv4_host_policy_ingress(struct __ctx_buff *ctx, struct iphdr *ip4,
 				      &audited, ext_err, &proxy_port);
 	if (verdict == DROP_POLICY_AUTH_REQUIRED) {
 		auth_type = (__u8)*ext_err;
-		verdict = auth_lookup(ctx, HOST_ID, *src_sec_identity, tunnel_endpoint, auth_type);
+		verdict = auth_lookup(ctx, HOST_ID, *src_sec_identity, tunnel_endpoint, auth_type, tuple);
 	}
 
 	/* Only create CT entry for accepted connections */

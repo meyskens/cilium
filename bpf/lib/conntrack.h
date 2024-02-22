@@ -293,9 +293,26 @@ __ct_lookup(const void *map, struct __ctx_buff *ctx, const void *tuple,
 		if (ct_entry_alive(entry))
 			*monitor = ct_update_timeout(entry, is_tcp, dir, seen_flags);
 
-		if (ct_state)
-			ct_lookup_fill_state(ct_state, entry, dir, syn);
+		ct_state->rev_nat_index = entry->rev_nat_index;
 
+		ct_state->auth_required = entry->auth_required;
+		ct_state->auth_ok = entry->auth_ok;
+		if (dir == CT_SERVICE) {
+			ct_state->backend_id = entry->backend_id;
+			ct_state->syn = syn;
+		} else if (dir == CT_INGRESS || dir == CT_EGRESS) {
+#ifndef DISABLE_LOOPBACK_LB
+			ct_state->loopback = entry->lb_loopback;
+#endif
+			ct_state->node_port = entry->node_port;
+			ct_state->dsr = entry->dsr;
+			ct_state->proxy_redirect = entry->proxy_redirect;
+			ct_state->from_l7lb = entry->from_l7lb;
+			ct_state->from_tunnel = entry->from_tunnel;
+#ifndef HAVE_FIB_IFINDEX
+			ct_state->ifindex = entry->ifindex;
+#endif
+		}
 #ifdef CONNTRACK_ACCOUNTING
 		/* FIXME: This is slow, per-cpu counters? */
 		if (dir == CT_INGRESS) {
@@ -1005,6 +1022,10 @@ static __always_inline int ct_create4(const void *map_main,
 	if (ct_state)
 		ct_create_fill_entry(&entry, ct_state, dir);
 
+	entry.auth_required = ct_state->auth_required;
+	entry.auth_ok = ct_state->auth_ok;
+
+	entry.rev_nat_index = ct_state->rev_nat_index;
 	seen_flags.value |= is_tcp ? TCP_FLAG_SYN : 0;
 	ct_update_timeout(&entry, is_tcp, dir, seen_flags);
 

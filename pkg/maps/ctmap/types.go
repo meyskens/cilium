@@ -565,8 +565,9 @@ const (
 	ProxyRedirect
 	DSR
 	FromL7LB
-	Reserved1
+	AuthRequired
 	FromTunnel
+	AuthOK
 	MaxFlags
 )
 
@@ -602,11 +603,17 @@ func (c *CtEntry) flagsString() string {
 	if (c.Flags & DSR) != 0 {
 		sb.WriteString("DSR ")
 	}
+	if (c.Flags & AuthRequired) != 0 {
+		sb.WriteString("AuthRequired ")
+	}
 	if (c.Flags & FromL7LB) != 0 {
 		sb.WriteString("FromL7LB ")
 	}
 	if (c.Flags & FromTunnel) != 0 {
 		sb.WriteString("FromTunnel ")
+	}
+	if (c.Flags & AuthOK) != 0 {
+		sb.WriteString("AuthOK ")
 	}
 
 	unknownFlags := c.Flags
