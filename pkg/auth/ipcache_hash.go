@@ -8,6 +8,7 @@ import (
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/maps/ipcache"
+	"golang.org/x/exp/maps"
 )
 
 // getIPCacheHash returns a hash of the IP cache map for the given identities.
@@ -51,8 +52,12 @@ func (m *mutualAuthHandler) getIPCacheHash(identities []identity.NumericIdentity
 	serializedData := ""
 
 	// serialize the map to a string
-	for id, ips := range mapToHash {
-		serializedData += fmt.Sprintf("%d:%s;", id, ips)
+	keys := maps.Keys(mapToHash)
+	sort.Slice(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+	for _, id := range keys {
+		serializedData += fmt.Sprintf("%d:%s;", id, mapToHash[id])
 	}
 
 	m.log.Debugf("Serialized data: %s", serializedData)
